@@ -12,27 +12,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Grist Report Writer</title>
-    <!-- Grist Plugin API -->
     <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
-    <!-- Template engine -->
     <script src="https://cdn.jsdelivr.net/npm/handlebars@4.7.8/dist/handlebars.min.js"></script>
-    <!-- Charts -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-    <!-- Maps -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.js"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
-    <script src="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
-    <!-- QR Codes -->
-    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
-    <!-- Barcodes -->
-    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
-    <!-- Excel export -->
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <!-- Screenshot for print -->
-    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 16px; color: #333; background: #fff; }
@@ -97,6 +78,49 @@
 
     // ── Grist Plugin API ──────────────────────────────────────────────────
     grist.ready({ requiredAccess: "full", columns: [] });
+
+    // ── Lazy-load libraries on demand ─────────────────────────────────────
+    const _loaded = {};
+    function loadScript(url) {
+        if (_loaded[url]) return _loaded[url];
+        _loaded[url] = new Promise((resolve, reject) => {
+            const s = document.createElement("script");
+            s.src = url; s.onload = resolve; s.onerror = reject;
+            document.head.appendChild(s);
+        });
+        return _loaded[url];
+    }
+    function loadCSS(url) {
+        if (_loaded[url]) return _loaded[url];
+        const link = document.createElement("link");
+        link.rel = "stylesheet"; link.href = url;
+        document.head.appendChild(link);
+        _loaded[url] = Promise.resolve();
+        return _loaded[url];
+    }
+    async function loadCharts() { await loadScript("https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"); }
+    async function loadMaps() {
+        loadCSS("https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.css");
+        loadCSS("https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/MarkerCluster.css");
+        loadCSS("https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css");
+        await loadScript("https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.js");
+        await Promise.all([
+            loadScript("https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.min.js"),
+            loadScript("https://cdn.jsdelivr.net/npm/leaflet.heat@0.2.0/dist/leaflet-heat.js")
+        ]);
+    }
+    async function loadQR() { await loadScript("https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"); }
+    async function loadBarcode() { await loadScript("https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"); }
+    async function loadExcel() { await loadScript("https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"); }
+
+    async function loadRequiredLibs(templateHTML) {
+        const promises = [];
+        if (/data-chart-type|data-chart=/.test(templateHTML)) promises.push(loadCharts());
+        if (/data-map/.test(templateHTML)) promises.push(loadMaps());
+        if (/data-qr/.test(templateHTML)) promises.push(loadQR());
+        if (/data-barcode/.test(templateHTML)) promises.push(loadBarcode());
+        if (promises.length > 0) await Promise.all(promises);
+    }
 
     async function fetchTable(tableId) {
         const data = await grist.docApi.fetchTable(tableId);
@@ -356,9 +380,10 @@
     }
 
     // ── Excel Export ─────────────────────────────────────────────────────────
-    function exportToExcel(container, reportName) {
+    async function exportToExcel(container, reportName) {
         const tables = container.querySelectorAll("table");
         if (tables.length === 0) { alert("No tables found to export"); return; }
+        await loadExcel();
         const wb = XLSX.utils.book_new();
         tables.forEach((table, i) => {
             const ws = XLSX.utils.table_to_sheet(table);
@@ -471,6 +496,10 @@
 
             const content = app.querySelector(".report-content");
             injectAssets(content, assetMap);
+
+            // Lazy-load only the libraries this template actually needs
+            await loadRequiredLibs(report.Template_HTML || "");
+
             renderCharts(content, data);
             renderMaps(content, data);
             renderQRCodes(content);
@@ -536,12 +565,13 @@
     });
 
     const WIDGET_NAME = "Report Writer";
-    const WIDGET_VERSION = "1.0.1";
+    const WIDGET_VERSION = "1.1.0";
 
     async function detectLinkedTable() { try { const t = await grist.selectedTable.getTableId(); if (t) linkedTableId = t; } catch(e) {} }
 
     console.log(`📄 ${WIDGET_NAME} v${WIDGET_VERSION} loading...`);
-    setTimeout(async () => {
+
+    async function init() {
         try {
             await detectLinkedTable();
             console.log(`📄 ${WIDGET_NAME}: Linked to "${linkedTableId || 'none'}"`);
@@ -552,7 +582,9 @@
         } catch(e) {
             app.innerHTML = `<div class="report-error">Could not load reports: ${e.message}<br><small>${WIDGET_NAME} v${WIDGET_VERSION}<br>Ensure "${REPORTS_TABLE}" table exists with: Report_Name, Description, Link_Table, Data_Tables, Filter_Mode, Template_HTML, Filters, Assets</small></div>`;
         }
-    }, 500);
+    }
+
+    init();
 
 })();
 </script>
