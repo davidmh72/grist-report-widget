@@ -11,385 +11,407 @@
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 16px; color: #333; background: #fff; }
 
-        .report-picker { max-width: 600px; margin: 40px auto; }
+        /* Picker */
+        .report-picker { max-width: 640px; margin: 24px auto; }
         .report-picker h2 { font-size: 18px; margin-bottom: 16px; color: #555; }
-        .report-card { padding: 12px 16px; border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 8px; cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; }
-        .report-card:hover { border-color: #16b378; box-shadow: 0 2px 8px rgba(22,179,120,0.15); }
-        .report-card h3 { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
-        .report-card p { font-size: 12px; color: #777; }
+        .table-group { margin-bottom: 20px; }
+        .table-group-title { font-size: 12px; font-weight: 600; color: #16b378; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #e8e8e8; }
+        .report-card { padding: 10px 14px; border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 6px; cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; }
+        .report-card:hover { border-color: #16b378; box-shadow: 0 2px 8px rgba(22,179,120,0.12); }
+        .report-card h3 { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+        .report-card p { font-size: 11px; color: #777; }
 
+        /* Toolbar */
         .report-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #eee; }
-        .report-toolbar button { padding: 6px 14px; border: 1px solid #ddd; border-radius: 6px; background: #fff; cursor: pointer; font-size: 12px; transition: background 0.15s; }
+        .report-toolbar button { padding: 6px 14px; border: 1px solid #ddd; border-radius: 6px; background: #fff; cursor: pointer; font-size: 12px; }
         .report-toolbar button:hover { background: #f5f5f5; }
         .report-toolbar .btn-print { background: #16b378; color: #fff; border-color: #16b378; }
         .report-toolbar .btn-print:hover { background: #12956a; }
         .report-toolbar h3 { font-size: 14px; flex: 1; }
 
+        /* States */
         .report-loading { text-align: center; padding: 40px; color: #999; }
-        .report-error { text-align: center; padding: 40px; color: #e53935; }
+        .report-error { text-align: center; padding: 40px; color: #e53935; font-size: 13px; }
 
-        @media print {
-            .report-toolbar { display: none !important; }
-            body { padding: 0; }
-        }
+        /* Filter popup */
+        .filter-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 9000; display: flex; align-items: center; justify-content: center; }
+        .filter-dialog { background: #fff; border-radius: 12px; padding: 24px; width: 90%; max-width: 480px; max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+        .filter-dialog h2 { font-size: 16px; margin-bottom: 16px; color: #333; }
+        .filter-group { margin-bottom: 16px; }
+        .filter-group label { display: block; font-size: 12px; font-weight: 600; color: #555; margin-bottom: 6px; }
+        .filter-choices { display: flex; flex-wrap: wrap; gap: 4px; max-height: 120px; overflow-y: auto; padding: 4px; border: 1px solid #eee; border-radius: 6px; }
+        .filter-choice { display: flex; align-items: center; gap: 4px; font-size: 11px; padding: 3px 8px; border-radius: 4px; background: #f8f8f8; cursor: pointer; user-select: none; }
+        .filter-choice input { margin: 0; }
+        .filter-choice:hover { background: #e8f5e9; }
+        .filter-date-range, .filter-number-range { display: flex; gap: 8px; align-items: center; }
+        .filter-date-range input, .filter-number-range input { padding: 6px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 12px; width: 140px; }
+        .filter-text input { padding: 6px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 12px; width: 100%; }
+        .filter-boolean { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+        .filter-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; padding-top: 16px; border-top: 1px solid #eee; }
+        .filter-actions button { padding: 8px 20px; border-radius: 6px; border: 1px solid #ddd; font-size: 12px; cursor: pointer; }
+        .filter-actions .btn-generate { background: #16b378; color: #fff; border-color: #16b378; font-weight: 600; }
+        .filter-actions .btn-generate:hover { background: #12956a; }
+
+        @media print { .report-toolbar { display: none !important; } body { padding: 0; } }
     </style>
 </head>
 <body>
-    <div id="app">
-        <div class="report-loading">Connecting to Grist...</div>
-    </div>
+<div id="app"><div class="report-loading">Connecting to Grist...</div></div>
+<script>
+(async function() {
+    "use strict";
+    const REPORTS_TABLE = "SysReports";
+    const app = document.getElementById("app");
 
-    <script>
-    (async function() {
-        "use strict";
+    // ── Grist Plugin API ──────────────────────────────────────────────────
+    grist.ready({ requiredAccess: "full", columns: [] });
 
-        const REPORTS_TABLE = "SysReports";
-        const app = document.getElementById("app");
-
-        // ── Grist Plugin API setup ──────────────────────────────────────────
-        grist.ready({
-            requiredAccess: "full",
-            columns: []
-        });
-
-        // ── Data fetching ──────────────────────────────────────────────────
-        // Fetch a table and return row-oriented array
-        async function fetchTable(tableId) {
-            const data = await grist.docApi.fetchTable(tableId);
-            const columns = Object.keys(data);
-            if (columns.length === 0) return [];
-            const rowCount = data.id ? data.id.length : data[columns[0]].length;
-            const rows = [];
-            for (let i = 0; i < rowCount; i++) {
-                const row = {};
-                for (const col of columns) {
-                    row[col] = data[col][i];
-                }
-                rows.push(row);
-            }
-            return rows;
+    async function fetchTable(tableId) {
+        const data = await grist.docApi.fetchTable(tableId);
+        const columns = Object.keys(data);
+        if (columns.length === 0) return [];
+        const rowCount = data.id ? data.id.length : data[columns[0]].length;
+        const rows = [];
+        for (let i = 0; i < rowCount; i++) {
+            const row = {};
+            for (const col of columns) row[col] = data[col][i];
+            rows.push(row);
         }
+        return rows;
+    }
 
-        // Fetch attachment metadata and content as blob URLs
-        // Grist stores attachments as [id1, id2, ...] in the cell
-        async function resolveAssets(attachmentIds) {
-            const assetMap = {}; // filename → blob URL
-            if (!attachmentIds || !Array.isArray(attachmentIds)) return assetMap;
-
-            // Filter out the "L" prefix marker that Grist uses for list columns
-            const ids = attachmentIds.filter(id => typeof id === "number");
-
-            for (const attId of ids) {
-                try {
-                    // Get attachment metadata (filename, type)
-                    const meta = await grist.docApi.getAttachment(attId);
-                    const filename = meta.fileName || `attachment_${attId}`;
-
-                    // Download the attachment content
-                    const url = await grist.docApi.getAttachmentUrl(attId);
-                    assetMap[filename] = url;
-                } catch(e) {
-                    console.warn(`Could not load attachment ${attId}:`, e);
-                }
-            }
-            return assetMap;
-        }
-
-        // Inject asset URLs into rendered HTML (replaces data-asset attributes)
-        function injectAssets(container, assetMap) {
-            container.querySelectorAll("[data-asset]").forEach(el => {
-                const filename = el.dataset.asset;
-                if (assetMap[filename]) {
-                    if (el.tagName === "IMG") {
-                        el.src = assetMap[filename];
-                    } else {
-                        // For divs etc, set as background image
-                        el.style.backgroundImage = `url(${assetMap[filename]})`;
-                    }
-                } else {
-                    console.warn(`Asset not found: ${filename}`);
-                }
-            });
-        }
-
-        // ── Handlebars helpers ─────────────────────────────────────────────
-        // Comparison
-        Handlebars.registerHelper("eq", (a, b) => a === b);
-        Handlebars.registerHelper("neq", (a, b) => a !== b);
-        Handlebars.registerHelper("gt", (a, b) => a > b);
-        Handlebars.registerHelper("lt", (a, b) => a < b);
-        Handlebars.registerHelper("gte", (a, b) => a >= b);
-        Handlebars.registerHelper("lte", (a, b) => a <= b);
-        Handlebars.registerHelper("and", (a, b) => a && b);
-        Handlebars.registerHelper("or", (a, b) => a || b);
-        Handlebars.registerHelper("not", (a) => !a);
-
-        // Math
-        Handlebars.registerHelper("add", (a, b) => Number(a) + Number(b));
-        Handlebars.registerHelper("subtract", (a, b) => Number(a) - Number(b));
-        Handlebars.registerHelper("multiply", (a, b) => Number(a) * Number(b));
-        Handlebars.registerHelper("divide", (a, b) => b !== 0 ? Number(a) / Number(b) : 0);
-        Handlebars.registerHelper("percent", (a, b) => b !== 0 ? ((a / b) * 100).toFixed(1) + "%" : "0%");
-        Handlebars.registerHelper("round", (n, d) => Number(n).toFixed(typeof d === "number" ? d : 0));
-
-        // Aggregation
-        Handlebars.registerHelper("count", (arr) => Array.isArray(arr) ? arr.length : 0);
-        Handlebars.registerHelper("sum", function(arr, key) {
-            if (!Array.isArray(arr)) return 0;
-            return arr.reduce((s, item) => s + (Number(item[key]) || 0), 0);
-        });
-        Handlebars.registerHelper("avg", function(arr, key) {
-            if (!Array.isArray(arr) || arr.length === 0) return 0;
-            const total = arr.reduce((s, item) => s + (Number(item[key]) || 0), 0);
-            return (total / arr.length).toFixed(1);
-        });
-        Handlebars.registerHelper("max", function(arr, key) {
-            if (!Array.isArray(arr) || arr.length === 0) return 0;
-            return Math.max(...arr.map(item => Number(item[key]) || 0));
-        });
-        Handlebars.registerHelper("min", function(arr, key) {
-            if (!Array.isArray(arr) || arr.length === 0) return 0;
-            return Math.min(...arr.map(item => Number(item[key]) || 0));
-        });
-        Handlebars.registerHelper("unique", function(arr, key) {
-            if (!Array.isArray(arr)) return [];
-            return [...new Set(arr.map(item => item[key]).filter(Boolean))];
-        });
-
-        // Grouping
-        Handlebars.registerHelper("groupBy", function(arr, key, options) {
-            if (!Array.isArray(arr)) return "";
-            const groups = {};
-            arr.forEach(item => {
-                const k = item[key] || "(blank)";
-                if (!groups[k]) groups[k] = [];
-                groups[k].push(item);
-            });
-            let out = "";
-            for (const [groupKey, items] of Object.entries(groups)) {
-                out += options.fn({ key: groupKey, items, count: items.length });
-            }
-            return out;
-        });
-
-        // Sorting
-        Handlebars.registerHelper("sortBy", function(arr, key, dir) {
-            if (!Array.isArray(arr)) return [];
-            const sorted = [...arr].sort((a, b) => {
-                const av = a[key], bv = b[key];
-                if (av < bv) return -1;
-                if (av > bv) return 1;
-                return 0;
-            });
-            return dir === "desc" ? sorted.reverse() : sorted;
-        });
-
-        // Filtering
-        Handlebars.registerHelper("filterBy", function(arr, key, value, options) {
-            if (!Array.isArray(arr)) return "";
-            const filtered = arr.filter(item => item[key] === value);
-            return options.fn({ items: filtered, count: filtered.length });
-        });
-
-        // Date formatting
-        Handlebars.registerHelper("formatDate", (val) => {
-            if (!val) return "";
-            const d = new Date(val * 1000); // Grist epoch seconds
-            return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-        });
-        Handlebars.registerHelper("now", () => new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }));
-
-        // String helpers
-        Handlebars.registerHelper("uppercase", (s) => String(s || "").toUpperCase());
-        Handlebars.registerHelper("lowercase", (s) => String(s || "").toLowerCase());
-        Handlebars.registerHelper("truncate", (s, len) => {
-            const str = String(s || "");
-            return str.length > len ? str.slice(0, len) + "..." : str;
-        });
-        Handlebars.registerHelper("json", (obj) => JSON.stringify(obj));
-
-        // ── Chart rendering ────────────────────────────────────────────────
-        function renderCharts(container, data) {
-            container.querySelectorAll("canvas[data-chart]").forEach(canvas => {
-                try {
-                    // Parse chart config — supports Handlebars in data-chart via pre-processing
-                    const config = JSON.parse(canvas.dataset.chart);
-                    new Chart(canvas, config);
-                } catch(e) {
-                    console.error("Chart render error:", e, canvas.dataset.chart);
-                }
-            });
-
-            // Simple declarative charts: data-chart-type, data-chart-table, etc.
-            container.querySelectorAll("canvas[data-chart-type]").forEach(canvas => {
-                try {
-                    const type = canvas.dataset.chartType;
-                    const table = canvas.dataset.chartTable;
-                    const labelField = canvas.dataset.chartLabel;
-                    const valueField = canvas.dataset.chartValue;
-                    const title = canvas.dataset.chartTitle || "";
-                    const groupField = canvas.dataset.chartGroup;
-
-                    const tableData = data[table];
-                    if (!Array.isArray(tableData)) return;
-
-                    let labels, values;
-
-                    if (groupField) {
-                        // Group and count
-                        const groups = {};
-                        tableData.forEach(row => {
-                            const key = row[groupField] || "(blank)";
-                            groups[key] = (groups[key] || 0) + (valueField ? (Number(row[valueField]) || 0) : 1);
-                        });
-                        labels = Object.keys(groups);
-                        values = Object.values(groups);
-                    } else {
-                        labels = tableData.map(row => row[labelField] || "");
-                        values = tableData.map(row => Number(row[valueField]) || 0);
-                    }
-
-                    const colours = [
-                        "#16b378", "#e63946", "#457b9d", "#f4a261",
-                        "#6a4c93", "#2a9d8f", "#e76f51", "#264653",
-                        "#84a98c", "#d62828", "#003049", "#fcbf49"
-                    ];
-
-                    new Chart(canvas, {
-                        type: type,
-                        data: {
-                            labels: labels,
-                            datasets: [{
-                                label: title,
-                                data: values,
-                                backgroundColor: type === "line" ? colours[0] : labels.map((_, i) => colours[i % colours.length]),
-                                borderColor: type === "line" ? colours[0] : undefined,
-                                borderWidth: type === "line" ? 2 : 1,
-                                fill: type === "line" ? false : undefined,
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            plugins: {
-                                title: { display: !!title, text: title },
-                                legend: { display: type === "pie" || type === "doughnut" }
-                            },
-                            scales: (type === "bar" || type === "line") ? {
-                                y: { beginAtZero: true }
-                            } : undefined
-                        }
-                    });
-                } catch(e) {
-                    console.error("Declarative chart error:", e);
-                }
-            });
-        }
-
-        // ── Report renderer ────────────────────────────────────────────────
-        async function renderReport(report) {
-            app.innerHTML = `<div class="report-loading">Generating report...</div>`;
-
+    async function resolveAssets(attachmentIds) {
+        const assetMap = {};
+        if (!attachmentIds || !Array.isArray(attachmentIds)) return assetMap;
+        const ids = attachmentIds.filter(id => typeof id === "number");
+        for (const attId of ids) {
             try {
-                // Fetch data from target tables
-                const targets = report.Target_Table ? report.Target_Table.split(",").map(t => t.trim()) : [];
-                const data = {};
-
-                await Promise.all(targets.map(async (table) => {
-                    data[table] = await fetchTable(table);
-                }));
-
-                // Add metadata
-                data._meta = {
-                    reportName: report.Report_Name,
-                    generatedAt: new Date().toLocaleString("en-GB"),
-                    recordCounts: {}
-                };
-                for (const [table, rows] of Object.entries(data)) {
-                    if (table !== "_meta") data._meta.recordCounts[table] = rows.length;
-                }
-
-                // Resolve assets from the Assets attachment column
-                let assetMap = {};
-                if (report.Assets) {
-                    assetMap = await resolveAssets(report.Assets);
-                }
-
-                // Compile and render Handlebars template
-                const template = Handlebars.compile(report.Template_HTML || "");
-                const html = template(data);
-
-                // Build the page
-                app.innerHTML = `
-                    <div class="report-toolbar">
-                        <button class="btn-back" onclick="showPicker()">← Reports</button>
-                        <h3>${report.Report_Name || "Report"}</h3>
-                        <button class="btn-print" onclick="window.print()">🖨 Print / PDF</button>
-                    </div>
-                    <div class="report-content">${html}</div>
-                `;
-
-                const content = app.querySelector(".report-content");
-
-                // Inject asset URLs into img[data-asset] elements
-                injectAssets(content, assetMap);
-
-                // Render charts
-                renderCharts(content, data);
-
-            } catch(e) {
-                app.innerHTML = `<div class="report-error">Error: ${e.message}</div>`;
-                console.error("Report render error:", e);
-            }
+                const meta = await grist.docApi.getAttachment(attId);
+                const url = await grist.docApi.getAttachmentUrl(attId);
+                assetMap[meta.fileName || `attachment_${attId}`] = url;
+            } catch(e) { console.warn(`Asset ${attId}:`, e); }
         }
+        return assetMap;
+    }
 
-        // ── Report picker ──────────────────────────────────────────────────
-        let reports = [];
+    function injectAssets(container, assetMap) {
+        container.querySelectorAll("[data-asset]").forEach(el => {
+            const fn = el.dataset.asset;
+            if (assetMap[fn]) {
+                if (el.tagName === "IMG") el.src = assetMap[fn];
+                else el.style.backgroundImage = `url(${assetMap[fn]})`;
+            }
+        });
+    }
 
-        function showPicker() {
-            if (reports.length === 0) {
-                app.innerHTML = `<div class="report-error">No reports found in ${REPORTS_TABLE} table.</div>`;
-                return;
+    // ── Handlebars helpers ─────────────────────────────────────────────────
+    Handlebars.registerHelper("eq", (a, b) => a === b);
+    Handlebars.registerHelper("neq", (a, b) => a !== b);
+    Handlebars.registerHelper("gt", (a, b) => a > b);
+    Handlebars.registerHelper("lt", (a, b) => a < b);
+    Handlebars.registerHelper("gte", (a, b) => a >= b);
+    Handlebars.registerHelper("lte", (a, b) => a <= b);
+    Handlebars.registerHelper("and", (a, b) => a && b);
+    Handlebars.registerHelper("or", (a, b) => a || b);
+    Handlebars.registerHelper("not", (a) => !a);
+    Handlebars.registerHelper("add", (a, b) => Number(a) + Number(b));
+    Handlebars.registerHelper("subtract", (a, b) => Number(a) - Number(b));
+    Handlebars.registerHelper("multiply", (a, b) => Number(a) * Number(b));
+    Handlebars.registerHelper("divide", (a, b) => b !== 0 ? Number(a) / Number(b) : 0);
+    Handlebars.registerHelper("percent", (a, b) => b !== 0 ? ((a / b) * 100).toFixed(1) + "%" : "0%");
+    Handlebars.registerHelper("round", (n, d) => Number(n).toFixed(typeof d === "number" ? d : 0));
+    Handlebars.registerHelper("count", (arr) => Array.isArray(arr) ? arr.length : 0);
+    Handlebars.registerHelper("sum", function(arr, key) {
+        if (!Array.isArray(arr)) return 0;
+        return arr.reduce((s, item) => s + (Number(item[key]) || 0), 0);
+    });
+    Handlebars.registerHelper("avg", function(arr, key) {
+        if (!Array.isArray(arr) || arr.length === 0) return 0;
+        return (arr.reduce((s, item) => s + (Number(item[key]) || 0), 0) / arr.length).toFixed(1);
+    });
+    Handlebars.registerHelper("max", function(arr, key) {
+        if (!Array.isArray(arr) || arr.length === 0) return 0;
+        return Math.max(...arr.map(item => Number(item[key]) || 0));
+    });
+    Handlebars.registerHelper("min", function(arr, key) {
+        if (!Array.isArray(arr) || arr.length === 0) return 0;
+        return Math.min(...arr.map(item => Number(item[key]) || 0));
+    });
+    Handlebars.registerHelper("unique", function(arr, key) {
+        if (!Array.isArray(arr)) return [];
+        return [...new Set(arr.map(item => item[key]).filter(Boolean))];
+    });
+    Handlebars.registerHelper("groupBy", function(arr, key, options) {
+        if (!Array.isArray(arr)) return "";
+        const groups = {};
+        arr.forEach(item => { const k = item[key] || "(blank)"; if (!groups[k]) groups[k] = []; groups[k].push(item); });
+        let out = "";
+        for (const [groupKey, items] of Object.entries(groups)) out += options.fn({ key: groupKey, items, count: items.length });
+        return out;
+    });
+    Handlebars.registerHelper("sortBy", function(arr, key, dir) {
+        if (!Array.isArray(arr)) return [];
+        const sorted = [...arr].sort((a, b) => a[key] < b[key] ? -1 : a[key] > b[key] ? 1 : 0);
+        return dir === "desc" ? sorted.reverse() : sorted;
+    });
+    Handlebars.registerHelper("filterBy", function(arr, key, value, options) {
+        if (!Array.isArray(arr)) return "";
+        const filtered = arr.filter(item => item[key] === value);
+        return options.fn({ items: filtered, count: filtered.length });
+    });
+    Handlebars.registerHelper("formatDate", (val) => {
+        if (!val) return "";
+        const d = new Date(val * 1000);
+        return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+    });
+    Handlebars.registerHelper("now", () => new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }));
+    Handlebars.registerHelper("uppercase", (s) => String(s || "").toUpperCase());
+    Handlebars.registerHelper("lowercase", (s) => String(s || "").toLowerCase());
+    Handlebars.registerHelper("truncate", (s, len) => { const str = String(s || ""); return str.length > len ? str.slice(0, len) + "..." : str; });
+    Handlebars.registerHelper("json", (obj) => JSON.stringify(obj));
+
+    // ── Chart rendering ────────────────────────────────────────────────────
+    function renderCharts(container, data) {
+        const colours = ["#16b378","#e63946","#457b9d","#f4a261","#6a4c93","#2a9d8f","#e76f51","#264653","#84a98c","#d62828","#003049","#fcbf49"];
+
+        container.querySelectorAll("canvas[data-chart]").forEach(canvas => {
+            try { new Chart(canvas, JSON.parse(canvas.dataset.chart)); } catch(e) { console.error("Chart error:", e); }
+        });
+
+        container.querySelectorAll("canvas[data-chart-type]").forEach(canvas => {
+            try {
+                const type = canvas.dataset.chartType;
+                const tableData = data[canvas.dataset.chartTable];
+                const groupField = canvas.dataset.chartGroup;
+                const labelField = canvas.dataset.chartLabel;
+                const valueField = canvas.dataset.chartValue;
+                const title = canvas.dataset.chartTitle || "";
+                if (!Array.isArray(tableData)) return;
+
+                let labels, values;
+                if (groupField) {
+                    const groups = {};
+                    tableData.forEach(row => { const k = row[groupField] || "(blank)"; groups[k] = (groups[k] || 0) + (valueField ? (Number(row[valueField]) || 0) : 1); });
+                    labels = Object.keys(groups); values = Object.values(groups);
+                } else {
+                    labels = tableData.map(row => row[labelField] || "");
+                    values = tableData.map(row => Number(row[valueField]) || 0);
+                }
+
+                new Chart(canvas, {
+                    type,
+                    data: { labels, datasets: [{ label: title, data: values, backgroundColor: type === "line" ? colours[0] : labels.map((_, i) => colours[i % colours.length]), borderColor: type === "line" ? colours[0] : undefined, borderWidth: type === "line" ? 2 : 1, fill: false }] },
+                    options: { responsive: true, plugins: { title: { display: !!title, text: title }, legend: { display: type === "pie" || type === "doughnut" } }, scales: (type === "bar" || type === "line") ? { y: { beginAtZero: true } } : undefined }
+                });
+            } catch(e) { console.error("Declarative chart error:", e); }
+        });
+    }
+
+    // ── Filter dialog ──────────────────────────────────────────────────────
+    function showFilterDialog(report, data) {
+        return new Promise((resolve) => {
+            let filters;
+            try { filters = JSON.parse(report.Filters || "[]"); } catch(e) { filters = []; }
+            if (filters.length === 0) { resolve({}); return; }
+
+            // Build unique values for choice filters
+            const choiceOptions = {};
+            filters.forEach(f => {
+                if (f.type === "choice") {
+                    const tableData = data[f.table] || [];
+                    const vals = [...new Set(tableData.map(row => row[f.field]).filter(v => v != null && v !== ""))].sort();
+                    choiceOptions[f.field] = vals;
+                }
+            });
+
+            let html = `<div class="filter-overlay" id="filter-overlay"><div class="filter-dialog"><h2>${report.Report_Name} — Filters</h2>`;
+
+            filters.forEach((f, i) => {
+                html += `<div class="filter-group"><label>${f.label || f.field}</label>`;
+                if (f.type === "choice") {
+                    html += `<div class="filter-choices">`;
+                    (choiceOptions[f.field] || []).forEach(val => {
+                        html += `<label class="filter-choice"><input type="checkbox" data-filter="${i}" value="${val}" checked> ${val}</label>`;
+                    });
+                    html += `</div>`;
+                } else if (f.type === "date-range") {
+                    html += `<div class="filter-date-range"><input type="date" data-filter="${i}" data-bound="from" placeholder="From"> <span>to</span> <input type="date" data-filter="${i}" data-bound="to" placeholder="To"></div>`;
+                } else if (f.type === "number-range") {
+                    html += `<div class="filter-number-range"><input type="number" data-filter="${i}" data-bound="from" placeholder="Min"> <span>to</span> <input type="number" data-filter="${i}" data-bound="to" placeholder="Max"></div>`;
+                } else if (f.type === "text") {
+                    html += `<div class="filter-text"><input type="text" data-filter="${i}" placeholder="Search..."></div>`;
+                } else if (f.type === "boolean") {
+                    html += `<div class="filter-boolean"><input type="checkbox" data-filter="${i}" checked> Only include matching</div>`;
+                }
+                html += `</div>`;
+            });
+
+            html += `<div class="filter-actions"><button class="btn-cancel" id="filter-cancel">Cancel</button><button class="btn-generate" id="filter-generate">Generate Report</button></div></div></div>`;
+
+            const container = document.createElement("div");
+            container.innerHTML = html;
+            document.body.appendChild(container);
+
+            document.getElementById("filter-cancel").onclick = () => { container.remove(); resolve(null); };
+            document.getElementById("filter-generate").onclick = () => {
+                const result = {};
+                filters.forEach((f, i) => {
+                    if (f.type === "choice") {
+                        const checked = [...container.querySelectorAll(`input[data-filter="${i}"]:checked`)].map(el => el.value);
+                        if (checked.length > 0 && checked.length < (choiceOptions[f.field] || []).length) {
+                            if (!result[f.table]) result[f.table] = [];
+                            result[f.table].push({ field: f.field, type: "choice", values: checked });
+                        }
+                    } else if (f.type === "date-range") {
+                        const from = container.querySelector(`input[data-filter="${i}"][data-bound="from"]`).value;
+                        const to = container.querySelector(`input[data-filter="${i}"][data-bound="to"]`).value;
+                        if (from || to) {
+                            if (!result[f.table]) result[f.table] = [];
+                            result[f.table].push({ field: f.field, type: "date-range", from: from ? new Date(from).getTime() / 1000 : null, to: to ? new Date(to).getTime() / 1000 : null });
+                        }
+                    } else if (f.type === "number-range") {
+                        const from = container.querySelector(`input[data-filter="${i}"][data-bound="from"]`).value;
+                        const to = container.querySelector(`input[data-filter="${i}"][data-bound="to"]`).value;
+                        if (from || to) {
+                            if (!result[f.table]) result[f.table] = [];
+                            result[f.table].push({ field: f.field, type: "number-range", from: from ? Number(from) : null, to: to ? Number(to) : null });
+                        }
+                    } else if (f.type === "text") {
+                        const val = container.querySelector(`input[data-filter="${i}"]`).value.trim();
+                        if (val) {
+                            if (!result[f.table]) result[f.table] = [];
+                            result[f.table].push({ field: f.field, type: "text", value: val.toLowerCase() });
+                        }
+                    } else if (f.type === "boolean") {
+                        const checked = container.querySelector(`input[data-filter="${i}"]`).checked;
+                        if (!result[f.table]) result[f.table] = [];
+                        result[f.table].push({ field: f.field, type: "boolean", value: checked });
+                    }
+                });
+                container.remove();
+                resolve(result);
+            };
+        });
+    }
+
+    function applyFilters(data, filterResult) {
+        if (!filterResult || Object.keys(filterResult).length === 0) return data;
+        const filtered = { ...data };
+        for (const [table, tableFilters] of Object.entries(filterResult)) {
+            if (!Array.isArray(filtered[table])) continue;
+            filtered[table] = filtered[table].filter(row => {
+                return tableFilters.every(f => {
+                    if (f.type === "choice") return f.values.includes(row[f.field]);
+                    if (f.type === "date-range") {
+                        const val = row[f.field];
+                        if (f.from && val < f.from) return false;
+                        if (f.to && val > f.to) return false;
+                        return true;
+                    }
+                    if (f.type === "number-range") {
+                        const val = Number(row[f.field]);
+                        if (f.from != null && val < f.from) return false;
+                        if (f.to != null && val > f.to) return false;
+                        return true;
+                    }
+                    if (f.type === "text") return String(row[f.field] || "").toLowerCase().includes(f.value);
+                    if (f.type === "boolean") return !!row[f.field] === f.value;
+                    return true;
+                });
+            });
+        }
+        return filtered;
+    }
+
+    // ── Report renderer ────────────────────────────────────────────────────
+    async function renderReport(report) {
+        app.innerHTML = `<div class="report-loading">Loading data...</div>`;
+        try {
+            // Fetch all target tables in parallel
+            const targets = report.Target_Table ? report.Target_Table.split(",").map(t => t.trim()) : [];
+            const data = {};
+            await Promise.all(targets.map(async (table) => { data[table] = await fetchTable(table); }));
+
+            // Show filter dialog if filters are defined
+            const filterResult = await showFilterDialog(report, data);
+            if (filterResult === null) { showPicker(); return; } // User cancelled
+
+            // Apply filters
+            const filteredData = applyFilters(data, filterResult);
+
+            // Add metadata
+            filteredData._meta = { reportName: report.Report_Name, generatedAt: new Date().toLocaleString("en-GB"), recordCounts: {} };
+            for (const [table, rows] of Object.entries(filteredData)) {
+                if (table !== "_meta") filteredData._meta.recordCounts[table] = rows.length;
             }
-            if (reports.length === 1) {
-                renderReport(reports[0]);
-                return;
-            }
-            let html = `<div class="report-picker"><h2>Available Reports</h2>`;
-            reports.forEach((r, i) => {
-                html += `<div class="report-card" onclick="selectReport(${i})">
-                    <h3>${r.Report_Name || "Untitled"}</h3>
-                    <p>${r.Description || ""}</p>
-                </div>`;
+
+            // Resolve assets
+            let assetMap = {};
+            if (report.Assets) assetMap = await resolveAssets(report.Assets);
+
+            // Render template
+            const template = Handlebars.compile(report.Template_HTML || "");
+            const html = template(filteredData);
+
+            app.innerHTML = `
+                <div class="report-toolbar">
+                    <button class="btn-back" onclick="showPicker()">← Reports</button>
+                    <h3>${report.Report_Name || "Report"}</h3>
+                    <button class="btn-print" onclick="window.print()">🖨 Print / PDF</button>
+                </div>
+                <div class="report-content">${html}</div>
+            `;
+
+            const content = app.querySelector(".report-content");
+            injectAssets(content, assetMap);
+            renderCharts(content, filteredData);
+        } catch(e) {
+            app.innerHTML = `<div class="report-error">Error: ${e.message}</div>`;
+            console.error("Report error:", e);
+        }
+    }
+
+    // ── Report picker (grouped by table) ────────────────────────────────────
+    let reports = [];
+
+    function showPicker() {
+        if (reports.length === 0) { app.innerHTML = `<div class="report-error">No reports found in ${REPORTS_TABLE}.</div>`; return; }
+        if (reports.length === 1) { renderReport(reports[0]); return; }
+
+        // Group reports by their primary target table
+        const groups = {};
+        reports.forEach((r, i) => {
+            const table = (r.Target_Table || "Other").split(",")[0].trim();
+            if (!groups[table]) groups[table] = [];
+            groups[table].push({ report: r, index: i });
+        });
+
+        let html = `<div class="report-picker"><h2>Reports</h2>`;
+        for (const [table, items] of Object.entries(groups)) {
+            html += `<div class="table-group"><div class="table-group-title">${table}</div>`;
+            items.forEach(({ report: r, index: i }) => {
+                html += `<div class="report-card" onclick="selectReport(${i})"><h3>${r.Report_Name || "Untitled"}</h3><p>${r.Description || ""}</p></div>`;
             });
             html += `</div>`;
-            app.innerHTML = html;
         }
+        html += `</div>`;
+        app.innerHTML = html;
+    }
 
-        window.selectReport = (i) => renderReport(reports[i]);
-        window.showPicker = showPicker;
+    window.selectReport = (i) => renderReport(reports[i]);
+    window.showPicker = showPicker;
 
-        // ── Initialise ─────────────────────────────────────────────────────
-        // Wait for Grist to be ready, then load reports
-        grist.onRecords(async () => {
-            // This fires when the widget is connected; we ignore the mapped data
-            // and instead fetch SysReports directly
-        });
+    // ── Initialise ──────────────────────────────────────────────────────────
+    setTimeout(async () => {
+        try {
+            reports = await fetchTable(REPORTS_TABLE);
+            showPicker();
+        } catch(e) {
+            app.innerHTML = `<div class="report-error">Could not load reports: ${e.message}<br><small>Ensure a "${REPORTS_TABLE}" table exists with columns: Report_Name, Description, Target_Table, Template_HTML, Filters, Assets</small></div>`;
+        }
+    }, 500);
 
-        // Give Grist a moment to establish the connection, then fetch reports
-        setTimeout(async () => {
-            try {
-                reports = await fetchTable(REPORTS_TABLE);
-                showPicker();
-            } catch(e) {
-                app.innerHTML = `<div class="report-error">
-                    Could not load reports: ${e.message}<br>
-                    <small>Ensure a "${REPORTS_TABLE}" table exists with columns:<br>
-                    Report_Name, Description, Target_Table, Template_HTML, Assets</small>
-                </div>`;
-            }
-        }, 500);
-
-    })();
-    </script>
+})();
+</script>
 </body>
 </html>
