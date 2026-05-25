@@ -13,6 +13,10 @@
     <!-- Maps -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.css">
     <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+    <script src="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
     <!-- QR Codes -->
     <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
     <!-- Barcodes -->
@@ -177,6 +181,57 @@
     });
     H.registerHelper("monthName", (m) => ["January","February","March","April","May","June","July","August","September","October","November","December"][m] || "");
 
+    // ── Additional helpers (visual & formatting) ─────────────────────────────
+    H.registerHelper("progressBar", function(value, max) {
+        const pct = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0;
+        return new H.SafeString(`<div style="background:#eee;border-radius:4px;height:8px;width:100%;overflow:hidden;"><div style="background:#16b378;height:100%;width:${pct}%;border-radius:4px;"></div></div>`);
+    });
+    H.registerHelper("stars", function(value, max) {
+        const m = max || 5; const v = Math.round(Number(value) || 0);
+        let s = ""; for (let i = 1; i <= m; i++) s += i <= v ? "★" : "☆";
+        return new H.SafeString(`<span style="color:#f4a261;letter-spacing:1px;">${s}</span>`);
+    });
+    H.registerHelper("colourScale", function(value, min, max) {
+        const ratio = max > min ? Math.max(0, Math.min(1, (value - min) / (max - min))) : 0;
+        const r = Math.round(255 * ratio), g = Math.round(255 * (1 - ratio));
+        return new H.SafeString(`<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:rgb(${r},${g},80);"></span>`);
+    });
+    H.registerHelper("initials", function(name) {
+        const parts = String(name || "").split(" ").filter(Boolean);
+        const ini = parts.map(p => p[0]).join("").toUpperCase().slice(0, 2);
+        const colours = ["#16b378","#e63946","#457b9d","#f4a261","#6a4c93","#2a9d8f","#e76f51","#264653"];
+        const colour = colours[ini.charCodeAt(0) % colours.length];
+        return new H.SafeString(`<span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:${colour};color:#fff;font-size:11px;font-weight:700;">${ini}</span>`);
+    });
+    H.registerHelper("timeAgo", function(timestamp) {
+        if (!timestamp) return "";
+        const now = Date.now() / 1000; const diff = now - timestamp;
+        if (diff < 60) return "just now";
+        if (diff < 3600) return Math.floor(diff / 60) + " min ago";
+        if (diff < 86400) return Math.floor(diff / 3600) + " hours ago";
+        if (diff < 2592000) return Math.floor(diff / 86400) + " days ago";
+        if (diff < 31536000) return Math.floor(diff / 2592000) + " months ago";
+        return Math.floor(diff / 31536000) + " years ago";
+    });
+    H.registerHelper("formatNumber", function(n) {
+        return Number(n || 0).toLocaleString("en-GB");
+    });
+    H.registerHelper("currency", function(value, code) {
+        const c = code || "GBP";
+        try { return Number(value || 0).toLocaleString("en-GB", { style: "currency", currency: c }); }
+        catch(e) { return Number(value || 0).toFixed(2); }
+    });
+    H.registerHelper("signatureLine", function(label) {
+        return new H.SafeString(`<div style="margin-top:40px;padding-top:8px;border-top:1px solid #333;width:250px;font-size:11px;color:#666;">${label || "Signature"}</div>`);
+    });
+    H.registerHelper("watermark", function(text) {
+        return new H.SafeString(`<div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-35deg);font-size:80px;font-weight:700;color:rgba(0,0,0,0.04);pointer-events:none;z-index:0;white-space:nowrap;">${text || "DRAFT"}</div>`);
+    });
+    H.registerHelper("labels", function(cols, options) {
+        const c = Number(cols) || 3;
+        return new H.SafeString(`<div style="display:grid;grid-template-columns:repeat(${c},1fr);gap:8px;">${options.fn(this)}</div>`);
+    });
+
     // ── Rendering: Charts ──────────────────────────────────────────────────
     const COLOURS = ["#16b378","#e63946","#457b9d","#f4a261","#6a4c93","#2a9d8f","#e76f51","#264653","#84a98c","#d62828","#003049","#fcbf49"];
 
@@ -209,6 +264,8 @@
                 const lngField = el.dataset.mapLng || "Longitude";
                 const labelField = el.dataset.mapLabel || "";
                 const colourField = el.dataset.mapColour || "";
+                const useCluster = el.dataset.mapCluster === "true";
+                const useHeat = el.dataset.mapHeat === "true";
                 if (!Array.isArray(tableData)) return;
 
                 const points = tableData.filter(r => r[latField] && r[lngField] && r[latField] !== 0);
@@ -218,19 +275,31 @@
                 const map = L.map(el).setView([points[0][latField], points[0][lngField]], 3);
                 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "© OpenStreetMap" }).addTo(map);
 
-                const colourMap = {};
-                let colourIdx = 0;
-                points.forEach(r => {
-                    const lat = Number(r[latField]), lng = Number(r[lngField]);
-                    if (isNaN(lat) || isNaN(lng)) return;
-                    let colour = COLOURS[0];
-                    if (colourField && r[colourField]) {
-                        if (!colourMap[r[colourField]]) colourMap[r[colourField]] = COLOURS[colourIdx++ % COLOURS.length];
-                        colour = colourMap[r[colourField]];
-                    }
-                    const marker = L.circleMarker([lat, lng], { radius: 6, fillColor: colour, color: "#fff", weight: 1, fillOpacity: 0.8 }).addTo(map);
-                    if (labelField && r[labelField]) marker.bindPopup(String(r[labelField]));
-                });
+                if (useHeat) {
+                    // Heatmap mode
+                    const heatPoints = points.map(r => [Number(r[latField]), Number(r[lngField]), 1]);
+                    L.heatLayer(heatPoints, { radius: 20, blur: 15, maxZoom: 10 }).addTo(map);
+                } else {
+                    // Marker mode (with optional clustering)
+                    const colourMap = {};
+                    let colourIdx = 0;
+                    const markerLayer = useCluster ? L.markerClusterGroup() : L.layerGroup();
+
+                    points.forEach(r => {
+                        const lat = Number(r[latField]), lng = Number(r[lngField]);
+                        if (isNaN(lat) || isNaN(lng)) return;
+                        let colour = COLOURS[0];
+                        if (colourField && r[colourField]) {
+                            if (!colourMap[r[colourField]]) colourMap[r[colourField]] = COLOURS[colourIdx++ % COLOURS.length];
+                            colour = colourMap[r[colourField]];
+                        }
+                        const marker = L.circleMarker([lat, lng], { radius: 6, fillColor: colour, color: "#fff", weight: 1, fillOpacity: 0.8 });
+                        if (labelField && r[labelField]) marker.bindPopup(String(r[labelField]));
+                        markerLayer.addLayer(marker);
+                    });
+
+                    map.addLayer(markerLayer);
+                }
 
                 // Fit bounds
                 const bounds = L.latLngBounds(points.map(r => [r[latField], r[lngField]]));
@@ -427,15 +496,21 @@
     // ── Initialise ──────────────────────────────────────────────────────────
     grist.onRecord((record) => { if (record && record.id) { currentRecord = record; const visible = linkedTableId ? reports.filter(r => (r.Link_Table || "").trim() === linkedTableId) : reports; if (visible.length === 1) renderReport(visible[0], currentRecord); } });
 
+    const WIDGET_NAME = "Report Writer";
+    const WIDGET_VERSION = "1.0.1";
+
     async function detectLinkedTable() { try { const t = await grist.selectedTable.getTableId(); if (t) linkedTableId = t; } catch(e) {} }
 
+    console.log(`📄 ${WIDGET_NAME} v${WIDGET_VERSION} loading...`);
     setTimeout(async () => {
         try {
             await detectLinkedTable();
+            console.log(`📄 ${WIDGET_NAME}: Linked to "${linkedTableId || 'none'}"`);
             reports = await fetchTable(REPORTS_TABLE);
+            console.log(`📄 ${WIDGET_NAME}: ${reports.length} reports loaded`);
             showPicker();
         } catch(e) {
-            app.innerHTML = `<div class="report-error">Could not load reports: ${e.message}<br><small>Ensure "${REPORTS_TABLE}" table exists with: Report_Name, Description, Link_Table, Data_Tables, Filter_Mode, Template_HTML, Filters, Assets</small></div>`;
+            app.innerHTML = `<div class="report-error">Could not load reports: ${e.message}<br><small>${WIDGET_NAME} v${WIDGET_VERSION}<br>Ensure "${REPORTS_TABLE}" table exists with: Report_Name, Description, Link_Table, Data_Tables, Filter_Mode, Template_HTML, Filters, Assets</small></div>`;
         }
     }, 500);
 
