@@ -3,15 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Grist Report Widget</title>
+    <title>Grist Report Writer</title>
+    <!-- Grist Plugin API -->
     <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+    <!-- Template engine -->
     <script src="https://cdn.jsdelivr.net/npm/handlebars@4.7.8/dist/handlebars.min.js"></script>
+    <!-- Charts -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <!-- Maps -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.js"></script>
+    <!-- QR Codes -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+    <!-- Barcodes -->
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+    <!-- Excel export -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- Screenshot for print -->
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 16px; color: #333; background: #fff; }
-
-        /* Picker */
         .report-picker { max-width: 640px; margin: 24px auto; }
         .report-picker h2 { font-size: 18px; margin-bottom: 16px; color: #555; }
         .table-group { margin-bottom: 20px; }
@@ -21,20 +33,16 @@
         .report-card h3 { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
         .report-card p { font-size: 11px; color: #777; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
         .report-card .mode-badge { font-size: 10px; padding: 3px 8px; border-radius: 4px; background: #f0f0f0; color: #555; text-transform: uppercase; font-weight: 600; white-space: nowrap; }
-
-        /* Toolbar */
-        .report-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #eee; }
+        .report-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #eee; flex-wrap: wrap; }
         .report-toolbar button { padding: 6px 14px; border: 1px solid #ddd; border-radius: 6px; background: #fff; cursor: pointer; font-size: 12px; }
         .report-toolbar button:hover { background: #f5f5f5; }
         .report-toolbar .btn-print { background: #16b378; color: #fff; border-color: #16b378; }
         .report-toolbar .btn-print:hover { background: #12956a; }
+        .report-toolbar .btn-excel { background: #264653; color: #fff; border-color: #264653; }
+        .report-toolbar .btn-excel:hover { background: #1a3540; }
         .report-toolbar h3 { font-size: 14px; flex: 1; }
-
-        /* States */
         .report-loading { text-align: center; padding: 40px; color: #999; }
         .report-error { text-align: center; padding: 40px; color: #e53935; font-size: 13px; }
-
-        /* Filter popup */
         .filter-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 9000; display: flex; align-items: center; justify-content: center; }
         .filter-dialog { background: #fff; border-radius: 12px; padding: 24px; width: 90%; max-width: 480px; max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
         .filter-dialog h2 { font-size: 16px; margin-bottom: 16px; color: #333; }
@@ -52,7 +60,6 @@
         .filter-actions button { padding: 8px 20px; border-radius: 6px; border: 1px solid #ddd; font-size: 12px; cursor: pointer; }
         .filter-actions .btn-generate { background: #16b378; color: #fff; border-color: #16b378; font-weight: 600; }
         .filter-actions .btn-generate:hover { background: #12956a; }
-
         @media print { .report-toolbar { display: none !important; } body { padding: 0; } }
     </style>
 </head>
@@ -106,106 +113,169 @@
     }
 
     // ── Handlebars helpers ─────────────────────────────────────────────────
-    Handlebars.registerHelper("eq", (a, b) => a === b);
-    Handlebars.registerHelper("neq", (a, b) => a !== b);
-    Handlebars.registerHelper("gt", (a, b) => a > b);
-    Handlebars.registerHelper("lt", (a, b) => a < b);
-    Handlebars.registerHelper("gte", (a, b) => a >= b);
-    Handlebars.registerHelper("lte", (a, b) => a <= b);
-    Handlebars.registerHelper("and", (a, b) => a && b);
-    Handlebars.registerHelper("or", (a, b) => a || b);
-    Handlebars.registerHelper("not", (a) => !a);
-    Handlebars.registerHelper("add", (a, b) => Number(a) + Number(b));
-    Handlebars.registerHelper("subtract", (a, b) => Number(a) - Number(b));
-    Handlebars.registerHelper("multiply", (a, b) => Number(a) * Number(b));
-    Handlebars.registerHelper("divide", (a, b) => b !== 0 ? Number(a) / Number(b) : 0);
-    Handlebars.registerHelper("percent", (a, b) => b !== 0 ? ((a / b) * 100).toFixed(1) + "%" : "0%");
-    Handlebars.registerHelper("round", (n, d) => Number(n).toFixed(typeof d === "number" ? d : 0));
-    Handlebars.registerHelper("count", (arr) => Array.isArray(arr) ? arr.length : 0);
-    Handlebars.registerHelper("sum", function(arr, key) {
-        if (!Array.isArray(arr)) return 0;
-        return arr.reduce((s, item) => s + (Number(item[key]) || 0), 0);
-    });
-    Handlebars.registerHelper("avg", function(arr, key) {
-        if (!Array.isArray(arr) || arr.length === 0) return 0;
-        return (arr.reduce((s, item) => s + (Number(item[key]) || 0), 0) / arr.length).toFixed(1);
-    });
-    Handlebars.registerHelper("max", function(arr, key) {
-        if (!Array.isArray(arr) || arr.length === 0) return 0;
-        return Math.max(...arr.map(item => Number(item[key]) || 0));
-    });
-    Handlebars.registerHelper("min", function(arr, key) {
-        if (!Array.isArray(arr) || arr.length === 0) return 0;
-        return Math.min(...arr.map(item => Number(item[key]) || 0));
-    });
-    Handlebars.registerHelper("unique", function(arr, key) {
-        if (!Array.isArray(arr)) return [];
-        return [...new Set(arr.map(item => item[key]).filter(Boolean))];
-    });
-    Handlebars.registerHelper("groupBy", function(arr, key, options) {
-        if (!Array.isArray(arr)) return "";
-        const groups = {};
-        arr.forEach(item => { const k = item[key] || "(blank)"; if (!groups[k]) groups[k] = []; groups[k].push(item); });
+    const H = Handlebars;
+    // Comparison
+    H.registerHelper("eq", (a, b) => a === b);
+    H.registerHelper("neq", (a, b) => a !== b);
+    H.registerHelper("gt", (a, b) => a > b);
+    H.registerHelper("lt", (a, b) => a < b);
+    H.registerHelper("gte", (a, b) => a >= b);
+    H.registerHelper("lte", (a, b) => a <= b);
+    H.registerHelper("and", (a, b) => a && b);
+    H.registerHelper("or", (a, b) => a || b);
+    H.registerHelper("not", (a) => !a);
+    // Math
+    H.registerHelper("add", (a, b) => Number(a) + Number(b));
+    H.registerHelper("subtract", (a, b) => Number(a) - Number(b));
+    H.registerHelper("multiply", (a, b) => Number(a) * Number(b));
+    H.registerHelper("divide", (a, b) => b !== 0 ? Number(a) / Number(b) : 0);
+    H.registerHelper("percent", (a, b) => b !== 0 ? ((a / b) * 100).toFixed(1) + "%" : "0%");
+    H.registerHelper("round", (n, d) => Number(n).toFixed(typeof d === "number" ? d : 0));
+    // Aggregation
+    H.registerHelper("count", (arr) => Array.isArray(arr) ? arr.length : 0);
+    H.registerHelper("sum", function(arr, key) { if (!Array.isArray(arr)) return 0; return arr.reduce((s, i) => s + (Number(i[key]) || 0), 0); });
+    H.registerHelper("avg", function(arr, key) { if (!Array.isArray(arr) || !arr.length) return 0; return (arr.reduce((s, i) => s + (Number(i[key]) || 0), 0) / arr.length).toFixed(1); });
+    H.registerHelper("max", function(arr, key) { if (!Array.isArray(arr) || !arr.length) return 0; return Math.max(...arr.map(i => Number(i[key]) || 0)); });
+    H.registerHelper("min", function(arr, key) { if (!Array.isArray(arr) || !arr.length) return 0; return Math.min(...arr.map(i => Number(i[key]) || 0)); });
+    H.registerHelper("unique", function(arr, key) { if (!Array.isArray(arr)) return []; return [...new Set(arr.map(i => i[key]).filter(Boolean))]; });
+    // Grouping & filtering
+    H.registerHelper("groupBy", function(arr, key, options) { if (!Array.isArray(arr)) return ""; const g = {}; arr.forEach(i => { const k = i[key] || "(blank)"; if (!g[k]) g[k] = []; g[k].push(i); }); let o = ""; for (const [k, items] of Object.entries(g)) o += options.fn({ key: k, items, count: items.length }); return o; });
+    H.registerHelper("filterBy", function(arr, key, value, options) { if (!Array.isArray(arr)) return ""; const f = arr.filter(i => i[key] === value); return options.fn({ items: f, count: f.length }); });
+    H.registerHelper("sortBy", function(arr, key, dir) { if (!Array.isArray(arr)) return []; const s = [...arr].sort((a, b) => a[key] < b[key] ? -1 : a[key] > b[key] ? 1 : 0); return dir === "desc" ? s.reverse() : s; });
+    // Dates
+    H.registerHelper("formatDate", (val) => { if (!val) return ""; return new Date(val * 1000).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }); });
+    H.registerHelper("formatDateTime", (val) => { if (!val) return ""; const d = new Date(val * 1000); return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) + " " + d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }); });
+    H.registerHelper("now", () => new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }));
+    H.registerHelper("year", (val) => val ? new Date(val * 1000).getFullYear() : new Date().getFullYear());
+    H.registerHelper("month", (val) => val ? new Date(val * 1000).getMonth() : new Date().getMonth());
+    H.registerHelper("dayOfWeek", (val) => { const d = new Date(val * 1000); return ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getDay()]; });
+    // Strings
+    H.registerHelper("uppercase", (s) => String(s || "").toUpperCase());
+    H.registerHelper("lowercase", (s) => String(s || "").toLowerCase());
+    H.registerHelper("truncate", (s, len) => { const str = String(s || ""); return str.length > len ? str.slice(0, len) + "..." : str; });
+    H.registerHelper("replace", (s, find, rep) => String(s || "").replace(new RegExp(find, "g"), rep));
+    H.registerHelper("json", (obj) => JSON.stringify(obj));
+    // Layout
+    H.registerHelper("pageBreak", () => new H.SafeString('<div style="page-break-after: always;"></div>'));
+    H.registerHelper("columns", function(count, options) { return new H.SafeString(`<div style="column-count:${count}; column-gap:16px;">${options.fn(this)}</div>`); });
+    // Calendar helpers
+    H.registerHelper("monthGrid", function(year, month, options) {
+        const firstDay = new Date(year, month, 1).getDay();
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        const weeks = [];
+        let day = 1 - firstDay;
+        for (let w = 0; w < 6; w++) {
+            const week = [];
+            for (let d = 0; d < 7; d++, day++) {
+                week.push(day > 0 && day <= daysInMonth ? day : null);
+            }
+            if (week.some(d => d !== null)) weeks.push(week);
+        }
         let out = "";
-        for (const [groupKey, items] of Object.entries(groups)) out += options.fn({ key: groupKey, items, count: items.length });
+        weeks.forEach(week => { out += options.fn({ days: week }); });
         return out;
     });
-    Handlebars.registerHelper("sortBy", function(arr, key, dir) {
-        if (!Array.isArray(arr)) return [];
-        const sorted = [...arr].sort((a, b) => a[key] < b[key] ? -1 : a[key] > b[key] ? 1 : 0);
-        return dir === "desc" ? sorted.reverse() : sorted;
-    });
-    Handlebars.registerHelper("filterBy", function(arr, key, value, options) {
-        if (!Array.isArray(arr)) return "";
-        const filtered = arr.filter(item => item[key] === value);
-        return options.fn({ items: filtered, count: filtered.length });
-    });
-    Handlebars.registerHelper("formatDate", (val) => {
-        if (!val) return "";
-        const d = new Date(val * 1000);
-        return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-    });
-    Handlebars.registerHelper("now", () => new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }));
-    Handlebars.registerHelper("uppercase", (s) => String(s || "").toUpperCase());
-    Handlebars.registerHelper("lowercase", (s) => String(s || "").toLowerCase());
-    Handlebars.registerHelper("truncate", (s, len) => { const str = String(s || ""); return str.length > len ? str.slice(0, len) + "..." : str; });
-    Handlebars.registerHelper("json", (obj) => JSON.stringify(obj));
+    H.registerHelper("monthName", (m) => ["January","February","March","April","May","June","July","August","September","October","November","December"][m] || "");
 
-    // ── Chart rendering ────────────────────────────────────────────────────
+    // ── Rendering: Charts ──────────────────────────────────────────────────
+    const COLOURS = ["#16b378","#e63946","#457b9d","#f4a261","#6a4c93","#2a9d8f","#e76f51","#264653","#84a98c","#d62828","#003049","#fcbf49"];
+
     function renderCharts(container, data) {
-        const colours = ["#16b378","#e63946","#457b9d","#f4a261","#6a4c93","#2a9d8f","#e76f51","#264653","#84a98c","#d62828","#003049","#fcbf49"];
-
         container.querySelectorAll("canvas[data-chart]").forEach(canvas => {
-            try { new Chart(canvas, JSON.parse(canvas.dataset.chart)); } catch(e) { console.error("Chart error:", e); }
+            try { new Chart(canvas, JSON.parse(canvas.dataset.chart)); } catch(e) { console.error("Chart:", e); }
         });
-
         container.querySelectorAll("canvas[data-chart-type]").forEach(canvas => {
             try {
-                const type = canvas.dataset.chartType;
-                const tableData = data[canvas.dataset.chartTable];
-                const groupField = canvas.dataset.chartGroup;
-                const labelField = canvas.dataset.chartLabel;
-                const valueField = canvas.dataset.chartValue;
-                const title = canvas.dataset.chartTitle || "";
+                const type = canvas.dataset.chartType, tableData = data[canvas.dataset.chartTable];
+                const groupField = canvas.dataset.chartGroup, labelField = canvas.dataset.chartLabel;
+                const valueField = canvas.dataset.chartValue, title = canvas.dataset.chartTitle || "";
                 if (!Array.isArray(tableData)) return;
-
                 let labels, values;
                 if (groupField) {
-                    const groups = {};
-                    tableData.forEach(row => { const k = row[groupField] || "(blank)"; groups[k] = (groups[k] || 0) + (valueField ? (Number(row[valueField]) || 0) : 1); });
-                    labels = Object.keys(groups); values = Object.values(groups);
-                } else {
-                    labels = tableData.map(row => row[labelField] || "");
-                    values = tableData.map(row => Number(row[valueField]) || 0);
-                }
-
-                new Chart(canvas, {
-                    type,
-                    data: { labels, datasets: [{ label: title, data: values, backgroundColor: type === "line" ? colours[0] : labels.map((_, i) => colours[i % colours.length]), borderColor: type === "line" ? colours[0] : undefined, borderWidth: type === "line" ? 2 : 1, fill: false }] },
-                    options: { responsive: true, plugins: { title: { display: !!title, text: title }, legend: { display: type === "pie" || type === "doughnut" } }, scales: (type === "bar" || type === "line") ? { y: { beginAtZero: true } } : undefined }
-                });
-            } catch(e) { console.error("Declarative chart error:", e); }
+                    const g = {}; tableData.forEach(r => { const k = r[groupField] || "(blank)"; g[k] = (g[k] || 0) + (valueField ? (Number(r[valueField]) || 0) : 1); });
+                    labels = Object.keys(g); values = Object.values(g);
+                } else { labels = tableData.map(r => r[labelField] || ""); values = tableData.map(r => Number(r[valueField]) || 0); }
+                new Chart(canvas, { type, data: { labels, datasets: [{ label: title, data: values, backgroundColor: type === "line" ? COLOURS[0] : labels.map((_, i) => COLOURS[i % COLOURS.length]), borderColor: type === "line" ? COLOURS[0] : undefined, borderWidth: type === "line" ? 2 : 1, fill: false }] }, options: { responsive: true, plugins: { title: { display: !!title, text: title }, legend: { display: type === "pie" || type === "doughnut" } }, scales: (type === "bar" || type === "line") ? { y: { beginAtZero: true } } : undefined } });
+            } catch(e) { console.error("Declarative chart:", e); }
         });
+    }
+
+    // ── Rendering: Maps ─────────────────────────────────────────────────────
+    function renderMaps(container, data) {
+        container.querySelectorAll("[data-map]").forEach(el => {
+            try {
+                const tableData = data[el.dataset.mapTable];
+                const latField = el.dataset.mapLat || "Latitude";
+                const lngField = el.dataset.mapLng || "Longitude";
+                const labelField = el.dataset.mapLabel || "";
+                const colourField = el.dataset.mapColour || "";
+                if (!Array.isArray(tableData)) return;
+
+                const points = tableData.filter(r => r[latField] && r[lngField] && r[latField] !== 0);
+                if (points.length === 0) { el.innerHTML = "<p style='color:#999;text-align:center;padding:20px;'>No coordinates available</p>"; return; }
+
+                el.style.minHeight = el.style.height || "400px";
+                const map = L.map(el).setView([points[0][latField], points[0][lngField]], 3);
+                L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "© OpenStreetMap" }).addTo(map);
+
+                const colourMap = {};
+                let colourIdx = 0;
+                points.forEach(r => {
+                    const lat = Number(r[latField]), lng = Number(r[lngField]);
+                    if (isNaN(lat) || isNaN(lng)) return;
+                    let colour = COLOURS[0];
+                    if (colourField && r[colourField]) {
+                        if (!colourMap[r[colourField]]) colourMap[r[colourField]] = COLOURS[colourIdx++ % COLOURS.length];
+                        colour = colourMap[r[colourField]];
+                    }
+                    const marker = L.circleMarker([lat, lng], { radius: 6, fillColor: colour, color: "#fff", weight: 1, fillOpacity: 0.8 }).addTo(map);
+                    if (labelField && r[labelField]) marker.bindPopup(String(r[labelField]));
+                });
+
+                // Fit bounds
+                const bounds = L.latLngBounds(points.map(r => [r[latField], r[lngField]]));
+                map.fitBounds(bounds, { padding: [20, 20] });
+            } catch(e) { console.error("Map:", e); }
+        });
+    }
+
+    // ── Rendering: QR Codes ─────────────────────────────────────────────────
+    function renderQRCodes(container) {
+        container.querySelectorAll("[data-qr]").forEach(el => {
+            try {
+                const value = el.dataset.qr;
+                const size = parseInt(el.dataset.qrSize) || 128;
+                if (!value) return;
+                const canvas = document.createElement("canvas");
+                QRCode.toCanvas(canvas, value, { width: size, margin: 1 }, (err) => { if (!err) el.appendChild(canvas); });
+            } catch(e) { console.error("QR:", e); }
+        });
+    }
+
+    // ── Rendering: Barcodes ─────────────────────────────────────────────────
+    function renderBarcodes(container) {
+        container.querySelectorAll("[data-barcode]").forEach(el => {
+            try {
+                const value = el.dataset.barcode;
+                const format = el.dataset.barcodeFormat || "CODE128";
+                if (!value) return;
+                const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+                el.appendChild(svg);
+                JsBarcode(svg, value, { format, height: 40, displayValue: true, fontSize: 12 });
+            } catch(e) { console.error("Barcode:", e); }
+        });
+    }
+
+    // ── Excel Export ─────────────────────────────────────────────────────────
+    function exportToExcel(container, reportName) {
+        const tables = container.querySelectorAll("table");
+        if (tables.length === 0) { alert("No tables found to export"); return; }
+        const wb = XLSX.utils.book_new();
+        tables.forEach((table, i) => {
+            const ws = XLSX.utils.table_to_sheet(table);
+            XLSX.utils.book_append_sheet(wb, ws, `Sheet${i + 1}`);
+        });
+        XLSX.writeFile(wb, `${reportName || "report"}.xlsx`);
     }
 
     // ── Filter dialog ──────────────────────────────────────────────────────
@@ -214,83 +284,33 @@
             let filters;
             try { filters = JSON.parse(report.Filters || "[]"); } catch(e) { filters = []; }
             if (filters.length === 0) { resolve({}); return; }
-
-            // Build unique values for choice filters
             const choiceOptions = {};
-            filters.forEach(f => {
-                if (f.type === "choice") {
-                    const tableData = data[f.table] || [];
-                    const vals = [...new Set(tableData.map(row => row[f.field]).filter(v => v != null && v !== ""))].sort();
-                    choiceOptions[f.field] = vals;
-                }
-            });
+            filters.forEach(f => { if (f.type === "choice") { const td = data[f.table] || []; choiceOptions[f.field] = [...new Set(td.map(r => r[f.field]).filter(v => v != null && v !== ""))].sort(); } });
 
             let html = `<div class="filter-overlay" id="filter-overlay"><div class="filter-dialog"><h2>${report.Report_Name} — Filters</h2>`;
-
             filters.forEach((f, i) => {
                 html += `<div class="filter-group"><label>${f.label || f.field}</label>`;
-                if (f.type === "choice") {
-                    html += `<div class="filter-choices">`;
-                    (choiceOptions[f.field] || []).forEach(val => {
-                        html += `<label class="filter-choice"><input type="checkbox" data-filter="${i}" value="${val}" checked> ${val}</label>`;
-                    });
-                    html += `</div>`;
-                } else if (f.type === "date-range") {
-                    html += `<div class="filter-date-range"><input type="date" data-filter="${i}" data-bound="from" placeholder="From"> <span>to</span> <input type="date" data-filter="${i}" data-bound="to" placeholder="To"></div>`;
-                } else if (f.type === "number-range") {
-                    html += `<div class="filter-number-range"><input type="number" data-filter="${i}" data-bound="from" placeholder="Min"> <span>to</span> <input type="number" data-filter="${i}" data-bound="to" placeholder="Max"></div>`;
-                } else if (f.type === "text") {
-                    html += `<div class="filter-text"><input type="text" data-filter="${i}" placeholder="Search..."></div>`;
-                } else if (f.type === "boolean") {
-                    html += `<div class="filter-boolean"><input type="checkbox" data-filter="${i}" checked> Only include matching</div>`;
-                }
+                if (f.type === "choice") { html += `<div class="filter-choices">`; (choiceOptions[f.field] || []).forEach(val => { html += `<label class="filter-choice"><input type="checkbox" data-filter="${i}" value="${val}" checked> ${val}</label>`; }); html += `</div>`; }
+                else if (f.type === "date-range") { html += `<div class="filter-date-range"><input type="date" data-filter="${i}" data-bound="from"> <span>to</span> <input type="date" data-filter="${i}" data-bound="to"></div>`; }
+                else if (f.type === "number-range") { html += `<div class="filter-number-range"><input type="number" data-filter="${i}" data-bound="from" placeholder="Min"> <span>to</span> <input type="number" data-filter="${i}" data-bound="to" placeholder="Max"></div>`; }
+                else if (f.type === "text") { html += `<div class="filter-text"><input type="text" data-filter="${i}" placeholder="Search..."></div>`; }
+                else if (f.type === "boolean") { html += `<div class="filter-boolean"><input type="checkbox" data-filter="${i}" checked> Only include matching</div>`; }
                 html += `</div>`;
             });
-
             html += `<div class="filter-actions"><button class="btn-cancel" id="filter-cancel">Cancel</button><button class="btn-generate" id="filter-generate">Generate Report</button></div></div></div>`;
 
-            const container = document.createElement("div");
-            container.innerHTML = html;
-            document.body.appendChild(container);
-
+            const container = document.createElement("div"); container.innerHTML = html; document.body.appendChild(container);
             document.getElementById("filter-cancel").onclick = () => { container.remove(); resolve(null); };
             document.getElementById("filter-generate").onclick = () => {
                 const result = {};
                 filters.forEach((f, i) => {
-                    if (f.type === "choice") {
-                        const checked = [...container.querySelectorAll(`input[data-filter="${i}"]:checked`)].map(el => el.value);
-                        if (checked.length > 0 && checked.length < (choiceOptions[f.field] || []).length) {
-                            if (!result[f.table]) result[f.table] = [];
-                            result[f.table].push({ field: f.field, type: "choice", values: checked });
-                        }
-                    } else if (f.type === "date-range") {
-                        const from = container.querySelector(`input[data-filter="${i}"][data-bound="from"]`).value;
-                        const to = container.querySelector(`input[data-filter="${i}"][data-bound="to"]`).value;
-                        if (from || to) {
-                            if (!result[f.table]) result[f.table] = [];
-                            result[f.table].push({ field: f.field, type: "date-range", from: from ? new Date(from).getTime() / 1000 : null, to: to ? new Date(to).getTime() / 1000 : null });
-                        }
-                    } else if (f.type === "number-range") {
-                        const from = container.querySelector(`input[data-filter="${i}"][data-bound="from"]`).value;
-                        const to = container.querySelector(`input[data-filter="${i}"][data-bound="to"]`).value;
-                        if (from || to) {
-                            if (!result[f.table]) result[f.table] = [];
-                            result[f.table].push({ field: f.field, type: "number-range", from: from ? Number(from) : null, to: to ? Number(to) : null });
-                        }
-                    } else if (f.type === "text") {
-                        const val = container.querySelector(`input[data-filter="${i}"]`).value.trim();
-                        if (val) {
-                            if (!result[f.table]) result[f.table] = [];
-                            result[f.table].push({ field: f.field, type: "text", value: val.toLowerCase() });
-                        }
-                    } else if (f.type === "boolean") {
-                        const checked = container.querySelector(`input[data-filter="${i}"]`).checked;
-                        if (!result[f.table]) result[f.table] = [];
-                        result[f.table].push({ field: f.field, type: "boolean", value: checked });
-                    }
+                    if (f.type === "choice") { const checked = [...container.querySelectorAll(`input[data-filter="${i}"]:checked`)].map(el => el.value); if (checked.length > 0 && checked.length < (choiceOptions[f.field] || []).length) { if (!result[f.table]) result[f.table] = []; result[f.table].push({ field: f.field, type: "choice", values: checked }); } }
+                    else if (f.type === "date-range") { const from = container.querySelector(`input[data-filter="${i}"][data-bound="from"]`).value; const to = container.querySelector(`input[data-filter="${i}"][data-bound="to"]`).value; if (from || to) { if (!result[f.table]) result[f.table] = []; result[f.table].push({ field: f.field, type: "date-range", from: from ? new Date(from).getTime() / 1000 : null, to: to ? new Date(to).getTime() / 1000 : null }); } }
+                    else if (f.type === "number-range") { const from = container.querySelector(`input[data-filter="${i}"][data-bound="from"]`).value; const to = container.querySelector(`input[data-filter="${i}"][data-bound="to"]`).value; if (from || to) { if (!result[f.table]) result[f.table] = []; result[f.table].push({ field: f.field, type: "number-range", from: from ? Number(from) : null, to: to ? Number(to) : null }); } }
+                    else if (f.type === "text") { const val = container.querySelector(`input[data-filter="${i}"]`).value.trim(); if (val) { if (!result[f.table]) result[f.table] = []; result[f.table].push({ field: f.field, type: "text", value: val.toLowerCase() }); } }
+                    else if (f.type === "boolean") { const checked = container.querySelector(`input[data-filter="${i}"]`).checked; if (!result[f.table]) result[f.table] = []; result[f.table].push({ field: f.field, type: "boolean", value: checked }); }
                 });
-                container.remove();
-                resolve(result);
+                container.remove(); resolve(result);
             };
         });
     }
@@ -300,26 +320,14 @@
         const filtered = { ...data };
         for (const [table, tableFilters] of Object.entries(filterResult)) {
             if (!Array.isArray(filtered[table])) continue;
-            filtered[table] = filtered[table].filter(row => {
-                return tableFilters.every(f => {
-                    if (f.type === "choice") return f.values.includes(row[f.field]);
-                    if (f.type === "date-range") {
-                        const val = row[f.field];
-                        if (f.from && val < f.from) return false;
-                        if (f.to && val > f.to) return false;
-                        return true;
-                    }
-                    if (f.type === "number-range") {
-                        const val = Number(row[f.field]);
-                        if (f.from != null && val < f.from) return false;
-                        if (f.to != null && val > f.to) return false;
-                        return true;
-                    }
-                    if (f.type === "text") return String(row[f.field] || "").toLowerCase().includes(f.value);
-                    if (f.type === "boolean") return !!row[f.field] === f.value;
-                    return true;
-                });
-            });
+            filtered[table] = filtered[table].filter(row => tableFilters.every(f => {
+                if (f.type === "choice") return f.values.includes(row[f.field]);
+                if (f.type === "date-range") { const v = row[f.field]; if (f.from && v < f.from) return false; if (f.to && v > f.to) return false; return true; }
+                if (f.type === "number-range") { const v = Number(row[f.field]); if (f.from != null && v < f.from) return false; if (f.to != null && v > f.to) return false; return true; }
+                if (f.type === "text") return String(row[f.field] || "").toLowerCase().includes(f.value);
+                if (f.type === "boolean") return !!row[f.field] === f.value;
+                return true;
+            }));
         }
         return filtered;
     }
@@ -335,65 +343,36 @@
             await Promise.all(targets.map(async (table) => { data[table] = await fetchTable(table); }));
 
             if (mode === "record") {
-                // Record mode: use selected record, filter linked tables
-                if (!selectedRecord || !selectedRecord.id) {
-                    app.innerHTML = `<div class="report-error">Select a record first to run this report.</div>`;
-                    return;
-                }
-                if (primaryTable && data[primaryTable]) {
-                    data[primaryTable] = data[primaryTable].filter(row => row.id === selectedRecord.id);
-                }
+                if (!selectedRecord || !selectedRecord.id) { app.innerHTML = `<div class="report-error">Select a record first to run this report.</div>`; return; }
+                if (primaryTable && data[primaryTable]) data[primaryTable] = data[primaryTable].filter(row => row.id === selectedRecord.id);
                 const selectedId = selectedRecord.id;
                 for (const table of targets.filter(t => t !== primaryTable)) {
                     if (!data[table] || data[table].length === 0) continue;
-                    const refCols = Object.keys(data[table][0] || {}).filter(col =>
-                        col === primaryTable ||
-                        col === primaryTable.replace(/s$/, "") ||
-                        col === primaryTable + "_ID" ||
-                        col === "Contact" ||
-                        col === "Organisation"
-                    );
-                    if (refCols.length > 0) {
-                        data[table] = data[table].filter(row =>
-                            refCols.some(col => row[col] === selectedId)
-                        );
-                    }
+                    const refCols = Object.keys(data[table][0] || {}).filter(col => col === primaryTable || col === primaryTable.replace(/s$/, "") || col === primaryTable + "_ID" || col === "Contact" || col === "Organisation");
+                    if (refCols.length > 0) data[table] = data[table].filter(row => refCols.some(col => row[col] === selectedId));
                 }
                 data._selected = selectedRecord;
-
             } else if (mode === "filtered") {
-                // Filtered mode: show filter popup
-                let filters;
-                try { filters = JSON.parse(report.Filters || "[]"); } catch(e) { filters = []; }
-                if (filters.length > 0) {
-                    const filterResult = await showFilterDialog(report, data);
-                    if (filterResult === null) { showPicker(); return; }
-                    Object.assign(data, applyFilters(data, filterResult));
-                }
-                // else: no filters defined, behave like "all"
-
+                let filters; try { filters = JSON.parse(report.Filters || "[]"); } catch(e) { filters = []; }
+                if (filters.length > 0) { const fr = await showFilterDialog(report, data); if (fr === null) { showPicker(); return; } Object.assign(data, applyFilters(data, fr)); }
             }
-            // mode === "all": no filtering, use all data as-is
 
-            // Add metadata
             data._meta = { reportName: report.Report_Name, generatedAt: new Date().toLocaleString("en-GB"), recordCounts: {} };
-            for (const [table, rows] of Object.entries(data)) {
-                if (table !== "_meta" && table !== "_selected") data._meta.recordCounts[table] = Array.isArray(rows) ? rows.length : 0;
-            }
+            for (const [t, rows] of Object.entries(data)) { if (t !== "_meta" && t !== "_selected") data._meta.recordCounts[t] = Array.isArray(rows) ? rows.length : 0; }
 
-            // Resolve assets
             let assetMap = {};
             if (report.Assets) assetMap = await resolveAssets(report.Assets);
 
-            // Render template
-            const template = Handlebars.compile(report.Template_HTML || "");
+            const template = H.compile(report.Template_HTML || "");
             const html = template(data);
 
+            const reportName = report.Report_Name || "Report";
             app.innerHTML = `
                 <div class="report-toolbar">
-                    <button class="btn-back" onclick="showPicker()">← Reports</button>
-                    <h3>${report.Report_Name || "Report"}</h3>
-                    <button class="btn-print" onclick="window.print()">🖨 Print / PDF</button>
+                    <button onclick="showPicker()">← Reports</button>
+                    <h3>${reportName}</h3>
+                    <button class="btn-print" onclick="window.print()">🖨 Print</button>
+                    <button class="btn-excel" onclick="exportToExcel(document.querySelector('.report-content'),'${reportName.replace(/'/g, "")}')">📊 Excel</button>
                 </div>
                 <div class="report-content">${html}</div>
             `;
@@ -401,53 +380,39 @@
             const content = app.querySelector(".report-content");
             injectAssets(content, assetMap);
             renderCharts(content, data);
+            renderMaps(content, data);
+            renderQRCodes(content);
+            renderBarcodes(content);
         } catch(e) {
             app.innerHTML = `<div class="report-error">Error: ${e.message}</div>`;
             console.error("Report error:", e);
         }
     }
 
-    // ── Report picker (grouped by Link_Table) ───────────────────────────────
+    // ── Report picker ────────────────────────────────────────────────────────
     let reports = [];
     let linkedTableId = null;
+    let currentRecord = null;
 
     function showPicker() {
-        // Filter reports to only those matching the linked table (if known)
-        const visible = linkedTableId
-            ? reports.filter(r => (r.Link_Table || "").trim() === linkedTableId)
-            : reports;
+        const visible = linkedTableId ? reports.filter(r => (r.Link_Table || "").trim() === linkedTableId) : reports;
+        if (visible.length === 0) { app.innerHTML = `<div class="report-error">No reports available${linkedTableId ? ` for "${linkedTableId}"` : ""}.</div>`; return; }
+        if (visible.length === 1 && (visible[0].Filter_Mode || "all").trim() !== "record") { renderReport(visible[0], currentRecord); return; }
+        if (visible.length === 1 && currentRecord) { renderReport(visible[0], currentRecord); return; }
 
-        if (visible.length === 0) {
-            app.innerHTML = `<div class="report-error">No reports available${linkedTableId ? ` for table "${linkedTableId}"` : ""}.</div>`;
-            return;
-        }
-        if (visible.length === 1 && (visible[0].Mode || "all").trim() !== "record") {
-            renderReport(visible[0], currentRecord);
-            return;
-        }
-        if (visible.length === 1 && currentRecord) {
-            renderReport(visible[0], currentRecord);
-            return;
-        }
-
-        // Group by Link_Table
         const groups = {};
-        visible.forEach((r) => {
-            const table = (r.Link_Table || "Other").trim();
-            if (!groups[table]) groups[table] = [];
-            groups[table].push(r);
-        });
+        visible.forEach(r => { const t = (r.Link_Table || "Other").trim(); if (!groups[t]) groups[t] = []; groups[t].push(r); });
 
         let html = `<div class="report-picker"><h2>Reports</h2>`;
         for (const [table, items] of Object.entries(groups)) {
             html += `<div class="table-group"><div class="table-group-title">${table}</div>`;
-            items.forEach((r) => {
+            items.forEach(r => {
                 const idx = reports.indexOf(r);
                 const mode = (r.Filter_Mode || "all").trim().toLowerCase();
                 const needsRecord = mode === "record" && !currentRecord;
-                const disabledClass = needsRecord ? ' style="opacity:0.5; pointer-events:none;"' : '';
+                const disabled = needsRecord ? ' style="opacity:0.5;pointer-events:none;"' : '';
                 const modeLabel = mode === "record" ? "Record" : mode === "filtered" ? "Filtered" : "All";
-                html += `<div class="report-card"${disabledClass} onclick="selectReport(${idx})"><div><h3>${r.Report_Name || "Untitled"}</h3><p>${r.Description || ""}${needsRecord ? " — <em>Select a record first</em>" : ""}</p></div><span class="mode-badge">${modeLabel}</span></div>`;
+                html += `<div class="report-card"${disabled} onclick="selectReport(${idx})"><div><h3>${r.Report_Name || "Untitled"}</h3><p>${r.Description || ""}${needsRecord ? " — <em>Select a record first</em>" : ""}</p></div><span class="mode-badge">${modeLabel}</span></div>`;
             });
             html += `</div>`;
         }
@@ -457,53 +422,24 @@
 
     window.selectReport = (i) => renderReport(reports[i], currentRecord);
     window.showPicker = showPicker;
+    window.exportToExcel = exportToExcel;
 
     // ── Initialise ──────────────────────────────────────────────────────────
-    let currentRecord = null;
+    grist.onRecord((record) => { if (record && record.id) { currentRecord = record; const visible = linkedTableId ? reports.filter(r => (r.Link_Table || "").trim() === linkedTableId) : reports; if (visible.length === 1) renderReport(visible[0], currentRecord); } });
 
-    // Detect which table the widget is linked to
-    grist.onRecord((record) => {
-        if (record && record.id) {
-            currentRecord = record;
-        }
-    });
+    async function detectLinkedTable() { try { const t = await grist.selectedTable.getTableId(); if (t) linkedTableId = t; } catch(e) {} }
 
-    // Get the linked table ID from the widget's data source
-    grist.onOptions((options) => {
-        // options may contain tableId info
-    });
-
-    // Use getTable to detect the linked table
-    async function detectLinkedTable() {
-        try {
-            const tableId = await grist.selectedTable.getTableId();
-            if (tableId) linkedTableId = tableId;
-        } catch(e) { /* Widget may not be linked */ }
-    }
-
-    // Load reports after a short delay to allow Grist connection
     setTimeout(async () => {
         try {
             await detectLinkedTable();
             reports = await fetchTable(REPORTS_TABLE);
             showPicker();
         } catch(e) {
-            app.innerHTML = `<div class="report-error">Could not load reports: ${e.message}<br><small>Ensure a "${REPORTS_TABLE}" table exists with columns: Report_Name, Description, Link_Table, Data_Tables, Template_HTML, Filters, Assets</small></div>`;
+            app.innerHTML = `<div class="report-error">Could not load reports: ${e.message}<br><small>Ensure "${REPORTS_TABLE}" table exists with: Report_Name, Description, Link_Table, Data_Tables, Filter_Mode, Template_HTML, Filters, Assets</small></div>`;
         }
     }, 500);
 
-    // Re-render when selected record changes
-    grist.onRecord((record) => {
-        if (record && record.id) {
-            currentRecord = record;
-            // If only one visible report, auto-render on selection change
-            const visible = linkedTableId
-                ? reports.filter(r => (r.Link_Table || "").trim() === linkedTableId)
-                : reports;
-            if (visible.length === 1) renderReport(visible[0], currentRecord);
-        }
-    });
-
+    grist.onRecord((record) => { if (record && record.id) currentRecord = record; });
 })();
 </script>
 </body>
