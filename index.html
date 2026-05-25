@@ -65,6 +65,29 @@
         .filter-actions .btn-generate { background: #16b378; color: #fff; border-color: #16b378; font-weight: 600; }
         .filter-actions .btn-generate:hover { background: #12956a; }
         @media print { .report-toolbar { display: none !important; } body { padding: 0; } }
+        @media print {
+            @page { margin: 15mm; }
+            body { background: #fff !important; }
+            .report-content { padding: 0; }
+            * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+            .card, .kpi, .kpi-card, .chart-box, .chart-card, .chart-panel,
+            .panel, .map-card, [data-map], .table-card, .section {
+                page-break-inside: avoid;
+                break-inside: avoid;
+            }
+            thead { display: table-header-group; }
+            tr { page-break-inside: avoid; break-inside: avoid; }
+            canvas { max-width: 100% !important; }
+            [data-map] { height: 400px !important; }
+            .dashboard, .report, .chart-grid, .chart-row, .kpi-row, .kpi-strip, .metrics, .panels, .summary-grid {
+                gap: 12px !important;
+            }
+            a[href]:after { content: " (" attr(href) ")"; font-size: 9px; color: #666; }
+            a[href^="mailto:"]:after { content: none; }
+            img[data-asset] + a:after, a:has(img):after { content: none; }
+            [data-qr], [data-barcode] { page-break-inside: avoid; break-inside: avoid; }
+            .filter-overlay { display: none !important; }
+        }
     </style>
 </head>
 <body>
@@ -526,6 +549,7 @@
             await detectLinkedTable();
             console.log(`📄 ${WIDGET_NAME}: Linked to "${linkedTableId || 'none'}"`);
             reports = await fetchTable(REPORTS_TABLE);
+            reports = reports.filter(r => r.Active === true);
             console.log(`📄 ${WIDGET_NAME}: ${reports.length} reports loaded`);
             showPicker();
         } catch(e) {
