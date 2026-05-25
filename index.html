@@ -324,25 +324,49 @@
     }
 
     // ── Report renderer ────────────────────────────────────────────────────
-    async function renderReport(report) {
+    async function renderReport(report, selectedRecord) {
         app.innerHTML = `<div class="report-loading">Loading data...</div>`;
         try {
-            // Fetch all target tables in parallel
-            const targets = report.Target_Table ? report.Target_Table.split(",").map(t => t.trim()) : [];
+            // Fetch all data tables in parallel
+            const targets = report.Data_Tables ? report.Data_Tables.split(",").map(t => t.trim()) : [];
+            const primaryTable = report.Link_Table ? report.Link_Table.trim() : targets[0];
             const data = {};
             await Promise.all(targets.map(async (table) => { data[table] = await fetchTable(table); }));
 
-            // Show filter dialog if filters are defined
-            const filterResult = await showFilterDialog(report, data);
-            if (filterResult === null) { showPicker(); return; } // User cancelled
-
-            // Apply filters
-            const filteredData = applyFilters(data, filterResult);
+            // If a selected record was passed (from linked widget), inject it
+            // and filter linked tables by the selected record's ID
+            if (selectedRecord && selectedRecord.id) {
+                if (primaryTable && data[primaryTable]) {
+                    data[primaryTable] = data[primaryTable].filter(row => row.id === selectedRecord.id);
+                }
+                const selectedId = selectedRecord.id;
+                for (const table of targets.filter(t => t !== primaryTable)) {
+                    if (!data[table] || data[table].length === 0) continue;
+                    const refCols = Object.keys(data[table][0] || {}).filter(col =>
+                        col === primaryTable ||
+                        col === primaryTable.replace(/s$/, "") ||
+                        col === primaryTable + "_ID" ||
+                        col === "Contact" ||
+                        col === "Organisation"
+                    );
+                    if (refCols.length > 0) {
+                        data[table] = data[table].filter(row =>
+                            refCols.some(col => row[col] === selectedId)
+                        );
+                    }
+                }
+                data._selected = selectedRecord;
+            } else {
+                // Show filter dialog if filters are defined (only when no linked record)
+                const filterResult = await showFilterDialog(report, data);
+                if (filterResult === null) { showPicker(); return; }
+                Object.assign(data, applyFilters(data, filterResult));
+            }
 
             // Add metadata
-            filteredData._meta = { reportName: report.Report_Name, generatedAt: new Date().toLocaleString("en-GB"), recordCounts: {} };
-            for (const [table, rows] of Object.entries(filteredData)) {
-                if (table !== "_meta") filteredData._meta.recordCounts[table] = rows.length;
+            data._meta = { reportName: report.Report_Name, generatedAt: new Date().toLocaleString("en-GB"), recordCounts: {} };
+            for (const [table, rows] of Object.entries(data)) {
+                if (table !== "_meta" && table !== "_selected") data._meta.recordCounts[table] = Array.isArray(rows) ? rows.length : 0;
             }
 
             // Resolve assets
@@ -351,7 +375,7 @@
 
             // Render template
             const template = Handlebars.compile(report.Template_HTML || "");
-            const html = template(filteredData);
+            const html = template(data);
 
             app.innerHTML = `
                 <div class="report-toolbar">
@@ -364,26 +388,35 @@
 
             const content = app.querySelector(".report-content");
             injectAssets(content, assetMap);
-            renderCharts(content, filteredData);
+            renderCharts(content, data);
         } catch(e) {
             app.innerHTML = `<div class="report-error">Error: ${e.message}</div>`;
             console.error("Report error:", e);
         }
     }
 
-    // ── Report picker (grouped by table) ────────────────────────────────────
+    // ── Report picker (grouped by Link_Table) ───────────────────────────────
     let reports = [];
+    let linkedTableId = null;
 
     function showPicker() {
-        if (reports.length === 0) { app.innerHTML = `<div class="report-error">No reports found in ${REPORTS_TABLE}.</div>`; return; }
-        if (reports.length === 1) { renderReport(reports[0]); return; }
+        // Filter reports to only those matching the linked table (if known)
+        const visible = linkedTableId
+            ? reports.filter(r => (r.Link_Table || "").trim() === linkedTableId)
+            : reports;
 
-        // Group reports by their primary target table
+        if (visible.length === 0) {
+            app.innerHTML = `<div class="report-error">No reports available${linkedTableId ? ` for table "${linkedTableId}"` : ""}.</div>`;
+            return;
+        }
+        if (visible.length === 1) { renderReport(visible[0], currentRecord); return; }
+
+        // Group by Link_Table
         const groups = {};
-        reports.forEach((r, i) => {
-            const table = (r.Target_Table || "Other").split(",")[0].trim();
+        visible.forEach((r, i) => {
+            const table = (r.Link_Table || "Other").trim();
             if (!groups[table]) groups[table] = [];
-            groups[table].push({ report: r, index: i });
+            groups[table].push({ report: r, index: reports.indexOf(r) });
         });
 
         let html = `<div class="report-picker"><h2>Reports</h2>`;
@@ -398,18 +431,54 @@
         app.innerHTML = html;
     }
 
-    window.selectReport = (i) => renderReport(reports[i]);
+    window.selectReport = (i) => renderReport(reports[i], currentRecord);
     window.showPicker = showPicker;
 
     // ── Initialise ──────────────────────────────────────────────────────────
+    let currentRecord = null;
+
+    // Detect which table the widget is linked to
+    grist.onRecord((record) => {
+        if (record && record.id) {
+            currentRecord = record;
+        }
+    });
+
+    // Get the linked table ID from the widget's data source
+    grist.onOptions((options) => {
+        // options may contain tableId info
+    });
+
+    // Use getTable to detect the linked table
+    async function detectLinkedTable() {
+        try {
+            const tableId = await grist.selectedTable.getTableId();
+            if (tableId) linkedTableId = tableId;
+        } catch(e) { /* Widget may not be linked */ }
+    }
+
+    // Load reports after a short delay to allow Grist connection
     setTimeout(async () => {
         try {
+            await detectLinkedTable();
             reports = await fetchTable(REPORTS_TABLE);
             showPicker();
         } catch(e) {
-            app.innerHTML = `<div class="report-error">Could not load reports: ${e.message}<br><small>Ensure a "${REPORTS_TABLE}" table exists with columns: Report_Name, Description, Target_Table, Template_HTML, Filters, Assets</small></div>`;
+            app.innerHTML = `<div class="report-error">Could not load reports: ${e.message}<br><small>Ensure a "${REPORTS_TABLE}" table exists with columns: Report_Name, Description, Link_Table, Data_Tables, Template_HTML, Filters, Assets</small></div>`;
         }
     }, 500);
+
+    // Re-render when selected record changes
+    grist.onRecord((record) => {
+        if (record && record.id) {
+            currentRecord = record;
+            // If only one visible report, auto-render on selection change
+            const visible = linkedTableId
+                ? reports.filter(r => (r.Link_Table || "").trim() === linkedTableId)
+                : reports;
+            if (visible.length === 1) renderReport(visible[0], currentRecord);
+        }
+    });
 
 })();
 </script>
