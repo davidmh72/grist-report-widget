@@ -413,7 +413,10 @@
 
             if (mode === "record") {
                 if (!selectedRecord || !selectedRecord.id) { app.innerHTML = `<div class="report-error">Select a record first to run this report.</div>`; return; }
+                console.log(`📄 Report Writer: Record mode — selectedRecord.id = ${selectedRecord.id}, primaryTable = ${primaryTable}, rows in table = ${data[primaryTable]?.length}`);
+                console.log(`📄 Report Writer: First 3 IDs in ${primaryTable}:`, data[primaryTable]?.slice(0, 3).map(r => r.id));
                 if (primaryTable && data[primaryTable]) data[primaryTable] = data[primaryTable].filter(row => row.id === selectedRecord.id);
+                console.log(`📄 Report Writer: After filter — ${data[primaryTable]?.length} rows remain`);
                 const selectedId = selectedRecord.id;
                 for (const table of targets.filter(t => t !== primaryTable)) {
                     if (!data[table] || data[table].length === 0) continue;
@@ -494,7 +497,23 @@
     window.exportToExcel = exportToExcel;
 
     // ── Initialise ──────────────────────────────────────────────────────────
-    grist.onRecord((record) => { if (record && record.id) { currentRecord = record; const visible = linkedTableId ? reports.filter(r => (r.Link_Table || "").trim() === linkedTableId) : reports; if (visible.length === 1) renderReport(visible[0], currentRecord); } });
+    grist.onRecord((record) => {
+        if (record && record.id) {
+            currentRecord = record;
+            const visible = linkedTableId ? reports.filter(r => (r.Link_Table || "").trim() === linkedTableId) : reports;
+            // Auto-render if only one report, OR if a report is currently displayed
+            if (visible.length === 1) {
+                renderReport(visible[0], currentRecord);
+            } else if (document.querySelector('.report-content')) {
+                // A report is already showing — find which one and re-render it
+                const currentReportName = document.querySelector('.report-toolbar h3')?.textContent;
+                const current = reports.find(r => r.Report_Name === currentReportName);
+                if (current && (current.Filter_Mode || "all").trim() === "record") {
+                    renderReport(current, currentRecord);
+                }
+            }
+        }
+    });
 
     const WIDGET_NAME = "Report Writer";
     const WIDGET_VERSION = "1.0.1";
@@ -514,7 +533,6 @@
         }
     }, 500);
 
-    grist.onRecord((record) => { if (record && record.id) currentRecord = record; });
 })();
 </script>
 </body>
