@@ -16,10 +16,11 @@
         .report-picker h2 { font-size: 18px; margin-bottom: 16px; color: #555; }
         .table-group { margin-bottom: 20px; }
         .table-group-title { font-size: 12px; font-weight: 600; color: #16b378; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #e8e8e8; }
-        .report-card { padding: 10px 14px; border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 6px; cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; }
+        .report-card { display: grid; grid-template-columns: 1fr auto; align-items: center; padding: 10px 14px; border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 6px; cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; }
         .report-card:hover { border-color: #16b378; box-shadow: 0 2px 8px rgba(22,179,120,0.12); }
         .report-card h3 { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
-        .report-card p { font-size: 11px; color: #777; }
+        .report-card p { font-size: 11px; color: #777; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
+        .report-card .mode-badge { font-size: 10px; padding: 3px 8px; border-radius: 4px; background: #f0f0f0; color: #555; text-transform: uppercase; font-weight: 600; white-space: nowrap; }
 
         /* Toolbar */
         .report-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #eee; }
@@ -327,15 +328,18 @@
     async function renderReport(report, selectedRecord) {
         app.innerHTML = `<div class="report-loading">Loading data...</div>`;
         try {
-            // Fetch all data tables in parallel
+            const mode = (report.Filter_Mode || "all").trim().toLowerCase();
             const targets = report.Data_Tables ? report.Data_Tables.split(",").map(t => t.trim()) : [];
             const primaryTable = report.Link_Table ? report.Link_Table.trim() : targets[0];
             const data = {};
             await Promise.all(targets.map(async (table) => { data[table] = await fetchTable(table); }));
 
-            // If a selected record was passed (from linked widget), inject it
-            // and filter linked tables by the selected record's ID
-            if (selectedRecord && selectedRecord.id) {
+            if (mode === "record") {
+                // Record mode: use selected record, filter linked tables
+                if (!selectedRecord || !selectedRecord.id) {
+                    app.innerHTML = `<div class="report-error">Select a record first to run this report.</div>`;
+                    return;
+                }
                 if (primaryTable && data[primaryTable]) {
                     data[primaryTable] = data[primaryTable].filter(row => row.id === selectedRecord.id);
                 }
@@ -356,12 +360,20 @@
                     }
                 }
                 data._selected = selectedRecord;
-            } else {
-                // Show filter dialog if filters are defined (only when no linked record)
-                const filterResult = await showFilterDialog(report, data);
-                if (filterResult === null) { showPicker(); return; }
-                Object.assign(data, applyFilters(data, filterResult));
+
+            } else if (mode === "filtered") {
+                // Filtered mode: show filter popup
+                let filters;
+                try { filters = JSON.parse(report.Filters || "[]"); } catch(e) { filters = []; }
+                if (filters.length > 0) {
+                    const filterResult = await showFilterDialog(report, data);
+                    if (filterResult === null) { showPicker(); return; }
+                    Object.assign(data, applyFilters(data, filterResult));
+                }
+                // else: no filters defined, behave like "all"
+
             }
+            // mode === "all": no filtering, use all data as-is
 
             // Add metadata
             data._meta = { reportName: report.Report_Name, generatedAt: new Date().toLocaleString("en-GB"), recordCounts: {} };
@@ -409,21 +421,33 @@
             app.innerHTML = `<div class="report-error">No reports available${linkedTableId ? ` for table "${linkedTableId}"` : ""}.</div>`;
             return;
         }
-        if (visible.length === 1) { renderReport(visible[0], currentRecord); return; }
+        if (visible.length === 1 && (visible[0].Mode || "all").trim() !== "record") {
+            renderReport(visible[0], currentRecord);
+            return;
+        }
+        if (visible.length === 1 && currentRecord) {
+            renderReport(visible[0], currentRecord);
+            return;
+        }
 
         // Group by Link_Table
         const groups = {};
-        visible.forEach((r, i) => {
+        visible.forEach((r) => {
             const table = (r.Link_Table || "Other").trim();
             if (!groups[table]) groups[table] = [];
-            groups[table].push({ report: r, index: reports.indexOf(r) });
+            groups[table].push(r);
         });
 
         let html = `<div class="report-picker"><h2>Reports</h2>`;
         for (const [table, items] of Object.entries(groups)) {
             html += `<div class="table-group"><div class="table-group-title">${table}</div>`;
-            items.forEach(({ report: r, index: i }) => {
-                html += `<div class="report-card" onclick="selectReport(${i})"><h3>${r.Report_Name || "Untitled"}</h3><p>${r.Description || ""}</p></div>`;
+            items.forEach((r) => {
+                const idx = reports.indexOf(r);
+                const mode = (r.Filter_Mode || "all").trim().toLowerCase();
+                const needsRecord = mode === "record" && !currentRecord;
+                const disabledClass = needsRecord ? ' style="opacity:0.5; pointer-events:none;"' : '';
+                const modeLabel = mode === "record" ? "Record" : mode === "filtered" ? "Filtered" : "All";
+                html += `<div class="report-card"${disabledClass} onclick="selectReport(${idx})"><div><h3>${r.Report_Name || "Untitled"}</h3><p>${r.Description || ""}${needsRecord ? " — <em>Select a record first</em>" : ""}</p></div><span class="mode-badge">${modeLabel}</span></div>`;
             });
             html += `</div>`;
         }
