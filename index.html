@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grist Report Widget</title>
+    <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/handlebars@4.7.8/dist/handlebars.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 16px; color: #333; background: #fff; }
+
+        .report-picker { max-width: 600px; margin: 40px auto; }
+        .report-picker h2 { font-size: 18px; margin-bottom: 16px; color: #555; }
+        .report-card { padding: 12px 16px; border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 8px; cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; }
+        .report-card:hover { border-color: #16b378; box-shadow: 0 2px 8px rgba(22,179,120,0.15); }
+        .report-card h3 { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+        .report-card p { font-size: 12px; color: #777; }
+
+        .report-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #eee; }
+        .report-toolbar button { padding: 6px 14px; border: 1px solid #ddd; border-radius: 6px; background: #fff; cursor: pointer; font-size: 12px; transition: background 0.15s; }
+        .report-toolbar button:hover { background: #f5f5f5; }
+        .report-toolbar .btn-print { background: #16b378; color: #fff; border-color: #16b378; }
+        .report-toolbar .btn-print:hover { background: #12956a; }
+        .report-toolbar h3 { font-size: 14px; flex: 1; }
+
+        .report-loading { text-align: center; padding: 40px; color: #999; }
+        .report-error { text-align: center; padding: 40px; color: #e53935; }
+
+        @media print {
+            .report-toolbar { display: none !important; }
+            body { padding: 0; }
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div class="report-loading">Connecting to Grist...</div>
+    </div>
+
+    <script>
+    (async function() {
+        "use strict";
+
+        const REPORTS_TABLE = "SysReports";
+        const app = document.getElementById("app");
+
+        // ── Grist Plugin API setup ──────────────────────────────────────────
+        grist.ready({
+            requiredAccess: "full",
+            columns: []
+        });
+
+        // ── Data fetching ──────────────────────────────────────────────────
+        // Fetch a table and return row-oriented array
+        async function fetchTable(tableId) {
+            const data = await grist.docApi.fetchTable(tableId);
+            const columns = Object.keys(data);
+            if (columns.length === 0) return [];
+            const rowCount = data.id ? data.id.length : data[columns[0]].length;
+            const rows = [];
+            for (let i = 0; i < rowCount; i++) {
+                const row = {};
+                for (const col of columns) {
+                    row[col] = data[col][i];
+                }
+                rows.push(row);
+            }
+            return rows;
+        }
+
+        // Fetch attachment metadata and content as blob URLs
+        // Grist stores attachments as [id1, id2, ...] in the cell
+        async function resolveAssets(attachmentIds) {
+            const assetMap = {}; // filename → blob URL
+            if (!attachmentIds || !Array.isArray(attachmentIds)) return assetMap;
+
+            // Filter out the "L" prefix marker that Grist uses for list columns
+            const ids = attachmentIds.filter(id => typeof id === "number");
+
+            for (const attId of ids) {
+                try {
+                    // Get attachment metadata (filename, type)
+                    const meta = await grist.docApi.getAttachment(attId);
+                    const filename = meta.fileName || `attachment_${attId}`;
+
+                    // Download the attachment content
+                    const url = await grist.docApi.getAttachmentUrl(attId);
+                    assetMap[filename] = url;
+                } catch(e) {
+                    console.warn(`Could not load attachment ${attId}:`, e);
+                }
+            }
+            return assetMap;
+        }
+
+        // Inject asset URLs into rendered HTML (replaces data-asset attributes)
+        function injectAssets(container, assetMap) {
+            container.querySelectorAll("[data-asset]").forEach(el => {
+                const filename = el.dataset.asset;
+                if (assetMap[filename]) {
+                    if (el.tagName === "IMG") {
+                        el.src = assetMap[filename];
+                    } else {
+                        // For divs etc, set as background image
+                        el.style.backgroundImage = `url(${assetMap[filename]})`;
+                    }
+                } else {
+                    console.warn(`Asset not found: ${filename}`);
+                }
+            });
+        }
+
+        // ── Handlebars helpers ─────────────────────────────────────────────
+        // Comparison
+        Handlebars.registerHelper("eq", (a, b) => a === b);
+        Handlebars.registerHelper("neq", (a, b) => a !== b);
+        Handlebars.registerHelper("gt", (a, b) => a > b);
+        Handlebars.registerHelper("lt", (a, b) => a < b);
+        Handlebars.registerHelper("gte", (a, b) => a >= b);
+        Handlebars.registerHelper("lte", (a, b) => a <= b);
+        Handlebars.registerHelper("and", (a, b) => a && b);
+        Handlebars.registerHelper("or", (a, b) => a || b);
+        Handlebars.registerHelper("not", (a) => !a);
+
+        // Math
+        Handlebars.registerHelper("add", (a, b) => Number(a) + Number(b));
+        Handlebars.registerHelper("subtract", (a, b) => Number(a) - Number(b));
+        Handlebars.registerHelper("multiply", (a, b) => Number(a) * Number(b));
+        Handlebars.registerHelper("divide", (a, b) => b !== 0 ? Number(a) / Number(b) : 0);
+        Handlebars.registerHelper("percent", (a, b) => b !== 0 ? ((a / b) * 100).toFixed(1) + "%" : "0%");
+        Handlebars.registerHelper("round", (n, d) => Number(n).toFixed(typeof d === "number" ? d : 0));
+
+        // Aggregation
+        Handlebars.registerHelper("count", (arr) => Array.isArray(arr) ? arr.length : 0);
+        Handlebars.registerHelper("sum", function(arr, key) {
+            if (!Array.isArray(arr)) return 0;
+            return arr.reduce((s, item) => s + (Number(item[key]) || 0), 0);
+        });
+        Handlebars.registerHelper("avg", function(arr, key) {
+            if (!Array.isArray(arr) || arr.length === 0) return 0;
+            const total = arr.reduce((s, item) => s + (Number(item[key]) || 0), 0);
+            return (total / arr.length).toFixed(1);
+        });
+        Handlebars.registerHelper("max", function(arr, key) {
+            if (!Array.isArray(arr) || arr.length === 0) return 0;
+            return Math.max(...arr.map(item => Number(item[key]) || 0));
+        });
+        Handlebars.registerHelper("min", function(arr, key) {
+            if (!Array.isArray(arr) || arr.length === 0) return 0;
+            return Math.min(...arr.map(item => Number(item[key]) || 0));
+        });
+        Handlebars.registerHelper("unique", function(arr, key) {
+            if (!Array.isArray(arr)) return [];
+            return [...new Set(arr.map(item => item[key]).filter(Boolean))];
+        });
+
+        // Grouping
+        Handlebars.registerHelper("groupBy", function(arr, key, options) {
+            if (!Array.isArray(arr)) return "";
+            const groups = {};
+            arr.forEach(item => {
+                const k = item[key] || "(blank)";
+                if (!groups[k]) groups[k] = [];
+                groups[k].push(item);
+            });
+            let out = "";
+            for (const [groupKey, items] of Object.entries(groups)) {
+                out += options.fn({ key: groupKey, items, count: items.length });
+            }
+            return out;
+        });
+
+        // Sorting
+        Handlebars.registerHelper("sortBy", function(arr, key, dir) {
+            if (!Array.isArray(arr)) return [];
+            const sorted = [...arr].sort((a, b) => {
+                const av = a[key], bv = b[key];
+                if (av < bv) return -1;
+                if (av > bv) return 1;
+                return 0;
+            });
+            return dir === "desc" ? sorted.reverse() : sorted;
+        });
+
+        // Filtering
+        Handlebars.registerHelper("filterBy", function(arr, key, value, options) {
+            if (!Array.isArray(arr)) return "";
+            const filtered = arr.filter(item => item[key] === value);
+            return options.fn({ items: filtered, count: filtered.length });
+        });
+
+        // Date formatting
+        Handlebars.registerHelper("formatDate", (val) => {
+            if (!val) return "";
+            const d = new Date(val * 1000); // Grist epoch seconds
+            return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+        });
+        Handlebars.registerHelper("now", () => new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }));
+
+        // String helpers
+        Handlebars.registerHelper("uppercase", (s) => String(s || "").toUpperCase());
+        Handlebars.registerHelper("lowercase", (s) => String(s || "").toLowerCase());
+        Handlebars.registerHelper("truncate", (s, len) => {
+            const str = String(s || "");
+            return str.length > len ? str.slice(0, len) + "..." : str;
+        });
+        Handlebars.registerHelper("json", (obj) => JSON.stringify(obj));
+
+        // ── Chart rendering ────────────────────────────────────────────────
+        function renderCharts(container, data) {
+            container.querySelectorAll("canvas[data-chart]").forEach(canvas => {
+                try {
+                    // Parse chart config — supports Handlebars in data-chart via pre-processing
+                    const config = JSON.parse(canvas.dataset.chart);
+                    new Chart(canvas, config);
+                } catch(e) {
+                    console.error("Chart render error:", e, canvas.dataset.chart);
+                }
+            });
+
+            // Simple declarative charts: data-chart-type, data-chart-table, etc.
+            container.querySelectorAll("canvas[data-chart-type]").forEach(canvas => {
+                try {
+                    const type = canvas.dataset.chartType;
+                    const table = canvas.dataset.chartTable;
+                    const labelField = canvas.dataset.chartLabel;
+                    const valueField = canvas.dataset.chartValue;
+                    const title = canvas.dataset.chartTitle || "";
+                    const groupField = canvas.dataset.chartGroup;
+
+                    const tableData = data[table];
+                    if (!Array.isArray(tableData)) return;
+
+                    let labels, values;
+
+                    if (groupField) {
+                        // Group and count
+                        const groups = {};
+                        tableData.forEach(row => {
+                            const key = row[groupField] || "(blank)";
+                            groups[key] = (groups[key] || 0) + (valueField ? (Number(row[valueField]) || 0) : 1);
+                        });
+                        labels = Object.keys(groups);
+                        values = Object.values(groups);
+                    } else {
+                        labels = tableData.map(row => row[labelField] || "");
+                        values = tableData.map(row => Number(row[valueField]) || 0);
+                    }
+
+                    const colours = [
+                        "#16b378", "#e63946", "#457b9d", "#f4a261",
+                        "#6a4c93", "#2a9d8f", "#e76f51", "#264653",
+                        "#84a98c", "#d62828", "#003049", "#fcbf49"
+                    ];
+
+                    new Chart(canvas, {
+                        type: type,
+                        data: {
+                            labels: labels,
+                            datasets: [{
+                                label: title,
+                                data: values,
+                                backgroundColor: type === "line" ? colours[0] : labels.map((_, i) => colours[i % colours.length]),
+                                borderColor: type === "line" ? colours[0] : undefined,
+                                borderWidth: type === "line" ? 2 : 1,
+                                fill: type === "line" ? false : undefined,
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            plugins: {
+                                title: { display: !!title, text: title },
+                                legend: { display: type === "pie" || type === "doughnut" }
+                            },
+                            scales: (type === "bar" || type === "line") ? {
+                                y: { beginAtZero: true }
+                            } : undefined
+                        }
+                    });
+                } catch(e) {
+                    console.error("Declarative chart error:", e);
+                }
+            });
+        }
+
+        // ── Report renderer ────────────────────────────────────────────────
+        async function renderReport(report) {
+            app.innerHTML = `<div class="report-loading">Generating report...</div>`;
+
+            try {
+                // Fetch data from target tables
+                const targets = report.Target_Table ? report.Target_Table.split(",").map(t => t.trim()) : [];
+                const data = {};
+
+                await Promise.all(targets.map(async (table) => {
+                    data[table] = await fetchTable(table);
+                }));
+
+                // Add metadata
+                data._meta = {
+                    reportName: report.Report_Name,
+                    generatedAt: new Date().toLocaleString("en-GB"),
+                    recordCounts: {}
+                };
+                for (const [table, rows] of Object.entries(data)) {
+                    if (table !== "_meta") data._meta.recordCounts[table] = rows.length;
+                }
+
+                // Resolve assets from the Assets attachment column
+                let assetMap = {};
+                if (report.Assets) {
+                    assetMap = await resolveAssets(report.Assets);
+                }
+
+                // Compile and render Handlebars template
+                const template = Handlebars.compile(report.Template_HTML || "");
+                const html = template(data);
+
+                // Build the page
+                app.innerHTML = `
+                    <div class="report-toolbar">
+                        <button class="btn-back" onclick="showPicker()">← Reports</button>
+                        <h3>${report.Report_Name || "Report"}</h3>
+                        <button class="btn-print" onclick="window.print()">🖨 Print / PDF</button>
+                    </div>
+                    <div class="report-content">${html}</div>
+                `;
+
+                const content = app.querySelector(".report-content");
+
+                // Inject asset URLs into img[data-asset] elements
+                injectAssets(content, assetMap);
+
+                // Render charts
+                renderCharts(content, data);
+
+            } catch(e) {
+                app.innerHTML = `<div class="report-error">Error: ${e.message}</div>`;
+                console.error("Report render error:", e);
+            }
+        }
+
+        // ── Report picker ──────────────────────────────────────────────────
+        let reports = [];
+
+        function showPicker() {
+            if (reports.length === 0) {
+                app.innerHTML = `<div class="report-error">No reports found in ${REPORTS_TABLE} table.</div>`;
+                return;
+            }
+            if (reports.length === 1) {
+                renderReport(reports[0]);
+                return;
+            }
+            let html = `<div class="report-picker"><h2>Available Reports</h2>`;
+            reports.forEach((r, i) => {
+                html += `<div class="report-card" onclick="selectReport(${i})">
+                    <h3>${r.Report_Name || "Untitled"}</h3>
+                    <p>${r.Description || ""}</p>
+                </div>`;
+            });
+            html += `</div>`;
+            app.innerHTML = html;
+        }
+
+        window.selectReport = (i) => renderReport(reports[i]);
+        window.showPicker = showPicker;
+
+        // ── Initialise ─────────────────────────────────────────────────────
+        // Wait for Grist to be ready, then load reports
+        grist.onRecords(async () => {
+            // This fires when the widget is connected; we ignore the mapped data
+            // and instead fetch SysReports directly
+        });
+
+        // Give Grist a moment to establish the connection, then fetch reports
+        setTimeout(async () => {
+            try {
+                reports = await fetchTable(REPORTS_TABLE);
+                showPicker();
+            } catch(e) {
+                app.innerHTML = `<div class="report-error">
+                    Could not load reports: ${e.message}<br>
+                    <small>Ensure a "${REPORTS_TABLE}" table exists with columns:<br>
+                    Report_Name, Description, Target_Table, Template_HTML, Assets</small>
+                </div>`;
+            }
+        }, 500);
+
+    })();
+    </script>
+</body>
+</html>
