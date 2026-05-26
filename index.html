@@ -3,7 +3,6 @@
   ============================================================
   REPORT WRITER (report_writer.html)
   Grist Report Widget — renders reports from SysReports table
-  Output: print reports only
   GitHub repo: grist-report-writer
   ============================================================
 -->
@@ -243,6 +242,58 @@
         return new H.SafeString(`<div style="display:grid;grid-template-columns:repeat(${c},1fr);gap:8px;">${options.fn(this)}</div>`);
     });
 
+    // ── Chart data helpers (return JSON-safe values for use in data-chart attributes) ──
+    H.registerHelper("groupCount", function(arr, field) {
+        if (!Array.isArray(arr)) return {};
+        const g = {};
+        arr.forEach(r => { const k = r[field] || "(blank)"; g[k] = (g[k] || 0) + 1; });
+        return g;
+    });
+    H.registerHelper("groupSum", function(arr, field, valueField) {
+        if (!Array.isArray(arr)) return {};
+        const g = {};
+        arr.forEach(r => { const k = r[field] || "(blank)"; g[k] = (g[k] || 0) + (Number(r[valueField]) || 0); });
+        return g;
+    });
+    H.registerHelper("groupAvg", function(arr, field, valueField) {
+        if (!Array.isArray(arr)) return {};
+        const g = {}; const c = {};
+        arr.forEach(r => { const k = r[field] || "(blank)"; g[k] = (g[k] || 0) + (Number(r[valueField]) || 0); c[k] = (c[k] || 0) + 1; });
+        const result = {};
+        for (const k of Object.keys(g)) result[k] = c[k] ? g[k] / c[k] : 0;
+        return result;
+    });
+    H.registerHelper("keys", function(obj) { return Object.keys(obj || {}); });
+    H.registerHelper("values", function(obj) { return Object.values(obj || {}); });
+
+    H.registerHelper("chartConfig", function(type, arr, groupField, metrics, title) {
+        // metrics format: "count,sum:Field,avg:Field" — comma-separated
+        if (!Array.isArray(arr)) return "{}";
+        const colours = ["#16b378","#e63946","#457b9d","#f4a261","#6a4c93","#2a9d8f","#e76f51","#264653"];
+        const g = {};
+        arr.forEach(r => { const k = r[groupField] || "(blank)"; if (!g[k]) g[k] = []; g[k].push(r); });
+        const labels = Object.keys(g);
+        const metricList = String(metrics).split(",").map(m => m.trim());
+        const datasets = metricList.map((spec, i) => {
+            const parts = spec.split(":");
+            const agg = parts[0];
+            const field = parts[1] || "";
+            const label = parts[2] || (agg === "count" ? "Count" : agg.charAt(0).toUpperCase() + agg.slice(1) + " " + field);
+            let data;
+            if (agg === "count") data = labels.map(k => g[k].length);
+            else if (agg === "sum") data = labels.map(k => g[k].reduce((s, r) => s + (Number(r[field]) || 0), 0));
+            else if (agg === "avg") data = labels.map(k => { const a = g[k]; return a.length ? a.reduce((s, r) => s + (Number(r[field]) || 0), 0) / a.length : 0; });
+            else data = labels.map(k => g[k].length);
+            return { label: label, data: data, backgroundColor: colours[i % colours.length], borderColor: colours[i % colours.length], borderWidth: 1 };
+        });
+        const config = {
+            type: type,
+            data: { labels: labels, datasets: datasets },
+            options: { responsive: true, plugins: { title: { display: !!title, text: title || "" }, legend: { display: datasets.length > 1 || type === "pie" || type === "doughnut" } }, scales: (type === "bar" || type === "line") ? { y: { beginAtZero: true } } : undefined }
+        };
+        return JSON.stringify(config);
+    });
+
     // ── Rendering: Charts ──────────────────────────────────────────────────
     const COLOURS = ["#16b378","#e63946","#457b9d","#f4a261","#6a4c93","#2a9d8f","#e76f51","#264653","#84a98c","#d62828","#003049","#fcbf49"];
 
@@ -255,13 +306,38 @@
                 const type = canvas.dataset.chartType, tableData = data[canvas.dataset.chartTable];
                 const groupField = canvas.dataset.chartGroup, labelField = canvas.dataset.chartLabel;
                 const valueField = canvas.dataset.chartValue, title = canvas.dataset.chartTitle || "";
+                const datasetsAttr = canvas.dataset.chartDatasets || "";
                 if (!Array.isArray(tableData)) return;
-                let labels, values;
-                if (groupField) {
+
+                let labels, datasets;
+
+                if (datasetsAttr && groupField) {
+                    // Multi-dataset mode: data-chart-datasets="count:Label,sum:Field:Label,avg:Field:Label"
+                    const g = {};
+                    tableData.forEach(r => { const k = r[groupField] || "(blank)"; if (!g[k]) g[k] = []; g[k].push(r); });
+                    labels = Object.keys(g);
+                    datasets = datasetsAttr.split(",").map((spec, si) => {
+                        const parts = spec.trim().split(":");
+                        const agg = parts[0]; // count, sum, avg
+                        const field = parts[1] || "";
+                        const label = parts[2] || (agg === "count" ? "Count" : agg + " " + field);
+                        let values;
+                        if (agg === "count") values = labels.map(k => g[k].length);
+                        else if (agg === "sum") values = labels.map(k => g[k].reduce((s, r) => s + (Number(r[field]) || 0), 0));
+                        else if (agg === "avg") values = labels.map(k => { const arr = g[k]; return arr.length ? arr.reduce((s, r) => s + (Number(r[field]) || 0), 0) / arr.length : 0; });
+                        else values = labels.map(k => g[k].length);
+                        return { label, data: values, backgroundColor: COLOURS[si % COLOURS.length], borderColor: COLOURS[si % COLOURS.length], borderWidth: 1 };
+                    });
+                } else if (groupField) {
                     const g = {}; tableData.forEach(r => { const k = r[groupField] || "(blank)"; g[k] = (g[k] || 0) + (valueField ? (Number(r[valueField]) || 0) : 1); });
-                    labels = Object.keys(g); values = Object.values(g);
-                } else { labels = tableData.map(r => r[labelField] || ""); values = tableData.map(r => Number(r[valueField]) || 0); }
-                new Chart(canvas, { type, data: { labels, datasets: [{ label: title, data: values, backgroundColor: type === "line" ? COLOURS[0] : labels.map((_, i) => COLOURS[i % COLOURS.length]), borderColor: type === "line" ? COLOURS[0] : undefined, borderWidth: type === "line" ? 2 : 1, fill: false }] }, options: { responsive: true, plugins: { title: { display: !!title, text: title }, legend: { display: type === "pie" || type === "doughnut" } }, scales: (type === "bar" || type === "line") ? { y: { beginAtZero: true } } : undefined } });
+                    labels = Object.keys(g);
+                    datasets = [{ label: title, data: Object.values(g), backgroundColor: type === "line" ? COLOURS[0] : labels.map((_, i) => COLOURS[i % COLOURS.length]), borderColor: type === "line" ? COLOURS[0] : undefined, borderWidth: type === "line" ? 2 : 1, fill: false }];
+                } else {
+                    labels = tableData.map(r => r[labelField] || "");
+                    datasets = [{ label: title, data: tableData.map(r => Number(r[valueField]) || 0), backgroundColor: type === "line" ? COLOURS[0] : labels.map((_, i) => COLOURS[i % COLOURS.length]), borderColor: type === "line" ? COLOURS[0] : undefined, borderWidth: type === "line" ? 2 : 1, fill: false }];
+                }
+
+                new Chart(canvas, { type, data: { labels, datasets }, options: { responsive: true, plugins: { title: { display: !!title, text: title }, legend: { display: datasets.length > 1 || type === "pie" || type === "doughnut" } }, scales: (type === "bar" || type === "line") ? { y: { beginAtZero: true } } : undefined } });
             } catch(e) { console.error("Declarative chart:", e); }
         });
     }
@@ -492,10 +568,12 @@
             items.forEach(r => {
                 const idx = reports.indexOf(r);
                 const mode = (r.Filter_Mode || "all").trim().toLowerCase();
+                const output = (r.Output || "screen").trim().toLowerCase();
                 const needsRecord = mode === "record" && !currentRecord;
                 const disabled = needsRecord ? ' style="opacity:0.5;pointer-events:none;"' : '';
                 const modeLabel = mode === "record" ? "Record" : mode === "filtered" ? "Filtered" : "All";
-                html += `<div class="report-card"${disabled} onclick="selectReport(${idx})"><div><h3>${r.Report_Name || "Untitled"}</h3><p>${r.Description || ""}${needsRecord ? " — <em>Select a record first</em>" : ""}</p></div><span class="mode-badge">${modeLabel}</span></div>`;
+                const outputLabel = output === "print" ? "🖨 Print" : "🖥 Screen";
+                html += `<div class="report-card"${disabled} onclick="selectReport(${idx})"><div><h3>${r.Report_Name || "Untitled"}</h3><p>${r.Description || ""}${needsRecord ? " — <em>Select a record first</em>" : ""}</p></div><div style="text-align:right;"><span class="mode-badge">${modeLabel}</span><br><span class="mode-badge" style="margin-top:4px;display:inline-block;">${outputLabel}</span></div></div>`;
             });
             html += `</div>`;
         }
@@ -538,7 +616,7 @@
             await detectLinkedTable();
             console.log(`📄 ${WIDGET_NAME}: Linked to "${linkedTableId || 'none'}"`);
             reports = await fetchTable(REPORTS_TABLE);
-            reports = reports.filter(r => r.Active === true && (r.Output || "").trim().toLowerCase() === "print");
+            reports = reports.filter(r => r.Active === true);
             console.log(`📄 ${WIDGET_NAME}: ${reports.length} reports loaded`);
             showPicker();
         } catch(e) {
