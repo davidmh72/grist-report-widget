@@ -14,6 +14,7 @@
     <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/handlebars@4.7.8/dist/handlebars.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.css">
     <script defer src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
@@ -241,6 +242,231 @@
     H.registerHelper("labels", function(cols, options) {
         const c = Number(cols) || 3;
         return new H.SafeString(`<div style="display:grid;grid-template-columns:repeat(${c},1fr);gap:8px;">${options.fn(this)}</div>`);
+    });
+
+    // ── String helpers ────────────────────────────────────────────────────
+    H.registerHelper("concat", function() {
+        const args = Array.prototype.slice.call(arguments, 0, -1);
+        return args.join("");
+    });
+    H.registerHelper("contains", function(str, sub) {
+        return String(str || "").toLowerCase().includes(String(sub || "").toLowerCase());
+    });
+    H.registerHelper("startsWith", function(str, prefix) {
+        return String(str || "").startsWith(String(prefix || ""));
+    });
+    H.registerHelper("endsWith", function(str, suffix) {
+        return String(str || "").endsWith(String(suffix || ""));
+    });
+    H.registerHelper("split", function(str, sep) {
+        return String(str || "").split(sep || ",").map(s => s.trim()).filter(Boolean);
+    });
+    H.registerHelper("join", function(arr, sep) {
+        if (!Array.isArray(arr)) return "";
+        return arr.join(typeof sep === "string" ? sep : ", ");
+    });
+    H.registerHelper("nl2br", function(str) {
+        return new H.SafeString(String(str || "").replace(/\n/g, "<br>"));
+    });
+    H.registerHelper("stripHtml", function(str) {
+        return String(str || "").replace(/<[^>]*>/g, "");
+    });
+    H.registerHelper("padStart", function(str, len, char) {
+        return String(str || "").padStart(Number(len) || 2, char || "0");
+    });
+    H.registerHelper("padEnd", function(str, len, char) {
+        return String(str || "").padEnd(Number(len) || 2, char || " ");
+    });
+    H.registerHelper("encodeURI", function(str) {
+        return encodeURIComponent(String(str || ""));
+    });
+    H.registerHelper("pluralize", function(count, singular, plural) {
+        const n = Number(count) || 0;
+        const p = typeof plural === "string" ? plural : singular + "s";
+        return n === 1 ? singular : p;
+    });
+    H.registerHelper("default", function(value, fallback) {
+        return (value !== undefined && value !== null && value !== "") ? value : fallback;
+    });
+    H.registerHelper("coalesce", function() {
+        const args = Array.prototype.slice.call(arguments, 0, -1);
+        for (const a of args) { if (a !== undefined && a !== null && a !== "") return a; }
+        return "";
+    });
+
+    // ── Math helpers (extended) ───────────────────────────────────────────
+    H.registerHelper("abs", (n) => Math.abs(Number(n) || 0));
+    H.registerHelper("ceil", (n) => Math.ceil(Number(n) || 0));
+    H.registerHelper("floor", (n) => Math.floor(Number(n) || 0));
+    H.registerHelper("pow", (base, exp) => Math.pow(Number(base) || 0, Number(exp) || 1));
+    H.registerHelper("sqrt", (n) => Math.sqrt(Number(n) || 0));
+    H.registerHelper("clamp", (n, min, max) => Math.max(Number(min), Math.min(Number(max), Number(n))));
+
+    // ── Date helpers (extended) ───────────────────────────────────────────
+    H.registerHelper("daysUntil", function(timestamp) {
+        if (!timestamp) return 0;
+        const target = new Date(timestamp * 1000);
+        const now = new Date();
+        return Math.ceil((target - now) / 86400000);
+    });
+    H.registerHelper("daysSince", function(timestamp) {
+        if (!timestamp) return 0;
+        const target = new Date(timestamp * 1000);
+        const now = new Date();
+        return Math.floor((now - target) / 86400000);
+    });
+    H.registerHelper("dateAdd", function(timestamp, days) {
+        if (!timestamp) return "";
+        const d = new Date(timestamp * 1000);
+        d.setDate(d.getDate() + (Number(days) || 0));
+        return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+    });
+    H.registerHelper("dateDiff", function(ts1, ts2, unit) {
+        if (!ts1 || !ts2) return 0;
+        const diff = Math.abs((ts1 - ts2) * 1000);
+        if (unit === "hours") return Math.floor(diff / 3600000);
+        if (unit === "minutes") return Math.floor(diff / 60000);
+        if (unit === "weeks") return Math.floor(diff / 604800000);
+        if (unit === "months") return Math.floor(diff / 2592000000);
+        if (unit === "years") return Math.floor(diff / 31536000000);
+        return Math.floor(diff / 86400000); // default: days
+    });
+    H.registerHelper("isOverdue", function(timestamp) {
+        if (!timestamp) return false;
+        return (timestamp * 1000) < Date.now();
+    });
+    H.registerHelper("isFuture", function(timestamp) {
+        if (!timestamp) return false;
+        return (timestamp * 1000) > Date.now();
+    });
+    H.registerHelper("isToday", function(timestamp) {
+        if (!timestamp) return false;
+        const d = new Date(timestamp * 1000);
+        const now = new Date();
+        return d.toDateString() === now.toDateString();
+    });
+    H.registerHelper("quarter", function(timestamp) {
+        if (!timestamp) return "";
+        const m = new Date(timestamp * 1000).getMonth();
+        return "Q" + (Math.floor(m / 3) + 1);
+    });
+    H.registerHelper("weekNumber", function(timestamp) {
+        if (!timestamp) return 0;
+        const d = new Date(timestamp * 1000);
+        const start = new Date(d.getFullYear(), 0, 1);
+        return Math.ceil(((d - start) / 86400000 + start.getDay() + 1) / 7);
+    });
+
+    // ── Conditional aggregation ───────────────────────────────────────────
+    H.registerHelper("countIf", function(arr, key, value) {
+        if (!Array.isArray(arr)) return 0;
+        return arr.filter(r => r[key] === value).length;
+    });
+    H.registerHelper("sumIf", function(arr, sumField, condField, condValue) {
+        if (!Array.isArray(arr)) return 0;
+        return arr.filter(r => r[condField] === condValue).reduce((s, r) => s + (Number(r[sumField]) || 0), 0);
+    });
+    H.registerHelper("avgIf", function(arr, avgField, condField, condValue) {
+        if (!Array.isArray(arr)) return 0;
+        const filtered = arr.filter(r => r[condField] === condValue);
+        if (!filtered.length) return 0;
+        return (filtered.reduce((s, r) => s + (Number(r[avgField]) || 0), 0) / filtered.length).toFixed(1);
+    });
+    H.registerHelper("first", function(arr, n) {
+        if (!Array.isArray(arr)) return [];
+        return arr.slice(0, Number(n) || 1);
+    });
+    H.registerHelper("last", function(arr, n) {
+        if (!Array.isArray(arr)) return [];
+        return arr.slice(-(Number(n) || 1));
+    });
+    H.registerHelper("nth", function(arr, index) {
+        if (!Array.isArray(arr)) return null;
+        return arr[Number(index) || 0];
+    });
+    H.registerHelper("pluck", function(arr, key) {
+        if (!Array.isArray(arr)) return [];
+        return arr.map(r => r[key]).filter(v => v !== undefined);
+    });
+    H.registerHelper("rank", function(arr, key, current) {
+        if (!Array.isArray(arr)) return 0;
+        const sorted = [...arr].sort((a, b) => (Number(b[key]) || 0) - (Number(a[key]) || 0));
+        return sorted.findIndex(r => r[key] === current) + 1;
+    });
+    H.registerHelper("runningTotal", function(arr, key, index) {
+        if (!Array.isArray(arr)) return 0;
+        let total = 0;
+        for (let i = 0; i <= Math.min(Number(index), arr.length - 1); i++) {
+            total += Number(arr[i][key]) || 0;
+        }
+        return total;
+    });
+    H.registerHelper("lookup", function(arr, key, value, returnField) {
+        if (!Array.isArray(arr)) return "";
+        const found = arr.find(r => r[key] === value);
+        return found ? (found[returnField] || "") : "";
+    });
+
+    // ── Visual/layout helpers (extended) ──────────────────────────────────
+    H.registerHelper("statusBadge", function(value, options) {
+        const colours = { active: "#16b378", open: "#16b378", won: "#16b378", completed: "#16b378", closed: "#e53935", lost: "#e53935", cancelled: "#e53935", pending: "#f4a261", "in progress": "#457b9d", draft: "#999", new: "#6a4c93" };
+        const v = String(value || "").toLowerCase();
+        const bg = colours[v] || "#999";
+        return new H.SafeString(`<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:${bg};color:#fff;font-size:10px;font-weight:600;text-transform:uppercase;">${value || ""}</span>`);
+    });
+    H.registerHelper("image", function(url, alt, width) {
+        const w = width || "auto";
+        const a = alt || "";
+        if (!url) return new H.SafeString(`<span style="display:inline-block;width:${w};height:${w};background:#eee;border-radius:4px;"></span>`);
+        return new H.SafeString(`<img src="${url}" alt="${a}" style="max-width:${typeof w === "number" ? w + "px" : w};height:auto;border-radius:4px;" onerror="this.style.display='none'">`);
+    });
+    H.registerHelper("phoneLink", function(phone) {
+        if (!phone) return "";
+        const clean = String(phone).replace(/[^\d+]/g, "");
+        return new H.SafeString(`<a href="tel:${clean}" style="color:#16b378;text-decoration:none;">${phone}</a>`);
+    });
+    H.registerHelper("emailLink", function(email) {
+        if (!email) return "";
+        return new H.SafeString(`<a href="mailto:${email}" style="color:#16b378;text-decoration:none;">${email}</a>`);
+    });
+    H.registerHelper("link", function(url, text) {
+        if (!url) return "";
+        const label = text || url;
+        return new H.SafeString(`<a href="${url}" target="_blank" style="color:#16b378;text-decoration:none;">${label}</a>`);
+    });
+    H.registerHelper("address", function(options) {
+        const h = options.hash || {};
+        const parts = [h.line1, h.line2, h.city, h.state, h.postcode, h.country].filter(Boolean);
+        return new H.SafeString(parts.join("<br>"));
+    });
+    H.registerHelper("table", function(arr, columns, options) {
+        if (!Array.isArray(arr) || !arr.length) return new H.SafeString("<p>No data</p>");
+        const cols = String(columns).split(",").map(c => c.trim());
+        let html = '<table style="width:100%;border-collapse:collapse;font-size:11px;"><thead><tr>';
+        cols.forEach(c => { html += `<th style="border:1px solid #ddd;padding:4px 8px;background:#f5f5f5;text-align:left;">${c}</th>`; });
+        html += "</tr></thead><tbody>";
+        arr.forEach(r => { html += "<tr>"; cols.forEach(c => { html += `<td style="border:1px solid #ddd;padding:4px 8px;">${r[c] !== undefined && r[c] !== null ? r[c] : ""}</td>`; }); html += "</tr>"; });
+        html += "</tbody></table>";
+        return new H.SafeString(html);
+    });
+    H.registerHelper("rowNumber", function(index) {
+        return (Number(index) || 0) + 1;
+    });
+    H.registerHelper("repeat", function(n, options) {
+        let out = "";
+        for (let i = 0; i < (Number(n) || 0); i++) out += options.fn({ index: i });
+        return out;
+    });
+    H.registerHelper("isBetween", function(value, min, max) {
+        const v = Number(value);
+        return v >= Number(min) && v <= Number(max);
+    });
+    H.registerHelper("barcode", function(value, options) {
+        if (!value) return "";
+        const h = (options && options.hash) || {};
+        const height = h.height || 40;
+        const width = h.width || 1;
+        return new H.SafeString(`<svg data-barcode="${value}" data-barcode-height="${height}" data-barcode-width="${width}"></svg>`);
     });
 
     // ── Chart data helpers (return JSON-safe values for use in data-chart attributes) ──
