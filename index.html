@@ -143,6 +143,7 @@
     H.registerHelper("subtract", (a, b) => Number(a) - Number(b));
     H.registerHelper("multiply", (a, b) => Number(a) * Number(b));
     H.registerHelper("divide", (a, b) => b !== 0 ? Number(a) / Number(b) : 0);
+    H.registerHelper("mod", (a, b) => b !== 0 ? Number(a) % Number(b) : 0);
     H.registerHelper("percent", (a, b) => b !== 0 ? ((a / b) * 100).toFixed(1) + "%" : "0%");
     H.registerHelper("round", (n, d) => Number(n).toFixed(typeof d === "number" ? d : 0));
     // Aggregation
